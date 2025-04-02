@@ -7,7 +7,7 @@ python3 get_models.py
 
 To run DNN-Adapt:
 ```
-clang++ -std=c++17 DNN-Adapt/main.cpp -o run
+bash build.sh # builds using cmake
 ./run -m models
 ```
 

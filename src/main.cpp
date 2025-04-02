@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <string>
 #include <map>
+#include <thread>
+#include "Simulator.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -60,7 +62,10 @@ int main(int argc, char * argv[]) {
         }
     }
     
-    
+    // start simulator thread
+    Simulator sim;
+    std::thread sim_thread(&Simulator::run, &sim);
+    sim_thread.join();
 
     return 0;
 }
