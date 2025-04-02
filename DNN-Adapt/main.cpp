@@ -7,9 +7,19 @@
 #include <getopt.h>
 #include <iostream>
 #include <filesystem>
+#include <string>
+#include <map>
 
-bool pathExists(const std::string& path) {
+bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
+}
+
+bool endsWith(const std::string &str, const std::string &pattern) {
+    if(pattern.length() > str.length()) {
+        return false;
+    }
+
+    return str.rfind(pattern) == str.length() - pattern.length();
 }
 
 int main(int argc, char * argv[]) {
@@ -20,24 +30,37 @@ int main(int argc, char * argv[]) {
     };
     
     int opt;
+    std::string model_dir = "";
     while((opt = getopt_long_only(argc, argv, "m:", long_options, &option_index)) != -1) {
         switch(opt) {
             case 0:
-                std::cout << "long option?" << std::endl;
-                std::cout << "option " << long_options[option_index].name << std::endl;
-                if (optarg)
-                    std::cout << " with arg " << optarg << std::endl;
-                std::cout << "exe - " << pathExists(optarg) << std::endl;
+                // std::cout << "option name" << long_options[option_index].name << std::endl;
+                model_dir = optarg;
                 break;
             case 'm':
-                std::cout << "short option?" << std::endl;
-                std::cout << optarg << std::endl;
+                model_dir = optarg;
                 break;
             default:
                 std::cout << "bad??" << std::endl;
         }
     }
+
+    if(!pathExists(model_dir)) {
+        std::cout << "Model repo path provided - " << model_dir << ", does not exist!" << std::endl;
+        exit(1);
+    }
+    
+    std::map<std::string, std::string> models;
+    for (const auto& entry : std::filesystem::directory_iterator(model_dir)) {
+        // std::cout << entry.path().filename().string() << std::endl;
+        auto file_name = entry.path().filename().string();
+        if(endsWith(file_name, ".onnx")) {
+            auto model_name = file_name.substr(0, file_name.find('.'));
+            models[model_name] = entry.path();
+        }
+    }
     
     
+
     return 0;
 }
