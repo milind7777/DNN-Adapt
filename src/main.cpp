@@ -11,6 +11,7 @@
 #include <map>
 #include <thread>
 #include "Simulator.h"
+#include "RequestProcessor.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -25,10 +26,10 @@ bool endsWith(const std::string &str, const std::string &pattern) {
 }
 
 int main(int argc, char * argv[]) {
-    
     int option_index = 0;
     static struct option long_options[] = {
-        {"model_repo", required_argument, 0, 0}
+        {"model_repo", required_argument, 0, 0},
+        {0, 0, 0, 0}
     };
     
     int opt;
@@ -62,9 +63,35 @@ int main(int argc, char * argv[]) {
         }
     }
     
+    // Initialize request processors
+    std::map<std::string, RequestProcessor*> request_processors;
+    for(auto m:models) {
+        request_processors[m.first] = new RequestProcessor();
+    }
+
     // start simulator thread
-    Simulator sim;
+    Simulator sim(request_processors);
     std::thread sim_thread(&Simulator::run, &sim);
+
+    // manual check for dynamic request generator
+    int total_req_count[3] = {0};
+    int new_req_count[3]   = {0};
+    for(int i=0;i<30;i++) {
+        int j = 0;
+        for(const auto &[model_name, processor]: request_processors) {
+            total_req_count[j] = processor->get_size();
+            processor->form_batch(total_req_count[j]);
+            j++;
+        }
+
+        for(int k=0;k<3;k++) {
+            std::cout << "<" << total_req_count[k] << "> ";
+        } std::cout << std::endl;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    
+    // Wait for thread to complete
     sim_thread.join();
 
     return 0;
