@@ -73,19 +73,21 @@ int main(int argc, char * argv[]) {
     Simulator sim(request_processors);
     std::thread sim_thread(&Simulator::run, &sim);
 
-    // manual check for dynamic request generator
+    // manual check for dynamic request generator and get request rate
     int total_req_count[3] = {0};
     int new_req_count[3]   = {0};
+    int request_rate[3]    = {0};
     for(int i=0;i<30;i++) {
         int j = 0;
         for(const auto &[model_name, processor]: request_processors) {
             total_req_count[j] = processor->get_size();
             processor->form_batch(total_req_count[j]);
+            request_rate[j] = processor->get_request_rate();
             j++;
         }
 
         for(int k=0;k<3;k++) {
-            std::cout << "<" << total_req_count[k] << "> ";
+            std::cout << "<" << request_rate[k] << "> ";
         } std::cout << std::endl;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
