@@ -12,6 +12,8 @@
 #include <thread>
 #include "Simulator.h"
 #include "RequestProcessor.h"
+#include "SchedulerInterface.h"
+#include "nexus.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -63,38 +65,68 @@ int main(int argc, char * argv[]) {
         }
     }
     
-    // Initialize request processors
-    std::map<std::string, RequestProcessor*> request_processors;
-    for(auto m:models) {
-        request_processors[m.first] = new RequestProcessor();
+    std::vector<std::shared_ptr<Gpu>> gpuList;
+    auto gpu1 = std::make_shared<Gpu>("A6000", 48);
+    auto gpu2 = std::make_shared<Gpu>("A6000", 48);
+    gpuList.push_back(gpu1);
+    gpuList.push_back(gpu2);
+
+    std::vector<std::string> modelNames;
+    for(auto model:models) {
+        modelNames.push_back(model.first);
     }
 
-    // start simulator thread
-    Simulator sim(request_processors);
-    std::thread sim_thread(&Simulator::run, &sim);
+    std::string profilingFolder = "models/profiles/sample";
 
-    // manual check for dynamic request generator and get request rate
-    int total_req_count[3] = {0};
-    int new_req_count[3]   = {0};
-    int request_rate[3]    = {0};
-    for(int i=0;i<30;i++) {
-        int j = 0;
-        for(const auto &[model_name, processor]: request_processors) {
-            total_req_count[j] = processor->get_size();
-            processor->form_batch(total_req_count[j]);
-            request_rate[j] = processor->get_request_rate();
-            j++;
-        }
-
-        for(int k=0;k<3;k++) {
-            std::cout << "<" << request_rate[k] << "> ";
-        } std::cout << std::endl;
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
+    NexusScheduler* test = new NexusScheduler(gpuList, modelNames, profilingFolder);
     
-    // Wait for thread to complete
-    sim_thread.join();
+    std::vector<std::shared_ptr<Session>> sessionList;
+    auto s1 = std::make_shared<Session>("vit16", 1000, 200);
+    auto s2 = std::make_shared<Session>("resnet18", 2000, 1000);
+    auto s3 = std::make_shared<Session>("efficientnetb0", 500, 500);
+    sessionList.push_back(s1);
+    sessionList.push_back(s2);
+    sessionList.push_back(s3);
+
+    std::cout << "Running generation\n";
+    auto nodeList = test->generate_schedule(sessionList);
+    for(int i=0;i<nodeList.size();i++) {
+        auto node = nodeList[i];
+        std::cout << "NODE NUMBER: " << i+1 << std::endl;
+        node->pretty_print();
+    }
+    // // Initialize request processors
+    // std::map<std::string, RequestProcessor*> request_processors;
+    // for(auto m:models) {
+    //     request_processors[m.first] = new RequestProcessor();
+    // }
+
+    // // start simulator thread
+    // Simulator sim(request_processors);
+    // std::thread sim_thread(&Simulator::run, &sim);
+
+    // // manual check for dynamic request generator and get request rate
+    // int total_req_count[3] = {0};
+    // int new_req_count[3]   = {0};
+    // int request_rate[3]    = {0};
+    // for(int i=0;i<30;i++) {
+    //     int j = 0;
+    //     for(const auto &[model_name, processor]: request_processors) {
+    //         total_req_count[j] = processor->get_size();
+    //         processor->form_batch(total_req_count[j]);
+    //         request_rate[j] = processor->get_request_rate();
+    //         j++;
+    //     }
+
+    //     for(int k=0;k<3;k++) {
+    //         std::cout << "<" << request_rate[k] << "> ";
+    //     } std::cout << std::endl;
+
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    // }
+    
+    // // Wait for thread to complete
+    // sim_thread.join();
 
     return 0;
 }
