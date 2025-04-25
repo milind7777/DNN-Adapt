@@ -14,6 +14,7 @@
 #include "RequestProcessor.h"
 #include "SchedulerInterface.h"
 #include "nexus.h"
+#include "NodeRunner.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);

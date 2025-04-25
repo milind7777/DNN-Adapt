@@ -5,6 +5,7 @@
 #include <ctime>
 #include <chrono>
 #include <atomic>
+#include <memory>
 
 const int RATE_CALCULATION_DURATION = 3; // the time window in seconds over which request rate is calculated
 

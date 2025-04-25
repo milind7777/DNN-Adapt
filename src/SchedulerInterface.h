@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <memory>
 
 const std::string LATENCY_COLUMN = "avg_latency_ms";
 const std::string BATCH_COLUMN = "batch_size";

@@ -4,6 +4,7 @@
 #include "SchedulerInterface.h"
 #include "iostream"
 #include <map>
+#include <memory>
 
 extern const std::string LATENCY_COLUMN;
 
