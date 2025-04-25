@@ -4,6 +4,14 @@
 #include "SchedulerInterface.h"
 #include <iostream>
 #include <thread>
+#include <atomic>
+#include <memory>
+#include <cuda_runtime.h>
+
+class ORTRunner {
+    // This class runs the onnx runtime, each instance will have a ort session, path to onnx file, cuda stream associated with it
+    int x;
+};
 
 class NodeRunner {
     // This class manages complete execution on 1 whole GPU
@@ -23,21 +31,49 @@ class NodeRunner {
 
 public:
     void updateNode(Node updated_node) {
-        update.lock();
+        _update.lock();
         new_node = updated_node;
-        isUpdate = true;
-        update.unlock();
+        pedningUpdate = true;
+        _update.unlock();
+    }
+
+    void start() {
+        if(!_running) _runner_thread = std::thread(&NodeRunner::run, this);
+    }
+
+    void stop() {
+        _running = false;
+        if(_runner_thread.joinable()) {
+            _runner_thread.join();
+        }
     }
 
 private:
-    std::mutex update;
-    bool isUpdate;
+    std::mutex _update;
+    bool pedningUpdate;
     Node new_node;
-};
 
-class ORTRunner {
-    // This class runs the onnx runtime, each instance will have a ort session, path to onnx file, cuda stream associated with it
-    int x;
+    void run() {
+        _running = true;
+        while(_running) {
+            if(!_running) break;
+
+            // loop through all session in the schedule
+
+            // check if update is needded
+            _update.lock();
+            if(pedningUpdate) {
+                // update node with new_node
+            } _update.unlock();
+        }
+    }
+
+    std::atomic<bool> _running = false;
+    std::thread _runner_thread;
+
+    int gpu_id;
+    Node node;
+    std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> ort_list;
 };
 
 #endif
