@@ -7,10 +7,25 @@
 #include <atomic>
 #include <memory>
 #include <cuda_runtime.h>
+#include <onnxruntime_cxx_api.h>
 
 class ORTRunner {
     // This class runs the onnx runtime, each instance will have a ort session, path to onnx file, cuda stream associated with it
-    int x;
+public:
+    ORTRunner(const std::string onnx_file_path): _session(Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXRuntime"), onnx_file_path.c_str(), _session_options) {
+        cudaError_t err = cudaStreamCreate(&_runner_stream);
+        if(err != cudaSuccess) {
+            throw std::runtime_error("Faile to create CUDA stream in ORTRunner");
+        }
+    }
+    
+    ~ORTRunner() {
+        cudaStreamDestroy(_runner_stream);
+    }
+
+    Ort::Session _session;
+    Ort::SessionOptions _session_options;
+    cudaStream_t _runner_stream;
 };
 
 class NodeRunner {

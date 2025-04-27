@@ -15,6 +15,7 @@
 #include "SchedulerInterface.h"
 #include "nexus.h"
 #include "NodeRunner.h"
+#include "imageInput.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -65,37 +66,42 @@ int main(int argc, char * argv[]) {
             models[model_name] = entry.path();
         }
     }
+
+    // testing mmap for bin file
+    auto mappedBin = mmap_bin_file("data/images/batch_input_nchw.bin");
+    std::cout << mappedBin.file_size << std::endl;
     
-    std::vector<std::shared_ptr<Gpu>> gpuList;
-    auto gpu1 = std::make_shared<Gpu>("A6000", 48);
-    auto gpu2 = std::make_shared<Gpu>("A6000", 48);
-    gpuList.push_back(gpu1);
-    gpuList.push_back(gpu2);
+    // std::vector<std::shared_ptr<Gpu>> gpuList;
+    // auto gpu1 = std::make_shared<Gpu>("A6000", 48);
+    // auto gpu2 = std::make_shared<Gpu>("A6000", 48);
+    // gpuList.push_back(gpu1);
+    // gpuList.push_back(gpu2);
 
-    std::vector<std::string> modelNames;
-    for(auto model:models) {
-        modelNames.push_back(model.first);
-    }
+    // std::vector<std::string> modelNames;
+    // for(auto model:models) {
+    //     modelNames.push_back(model.first);
+    // }
 
-    std::string profilingFolder = "models/profiles/sample";
+    // std::string profilingFolder = "models/profiles/sample";
 
-    NexusScheduler* test = new NexusScheduler(gpuList, modelNames, profilingFolder);
+    // NexusScheduler* test = new NexusScheduler(gpuList, modelNames, profilingFolder);
     
-    std::vector<std::shared_ptr<Session>> sessionList;
-    auto s1 = std::make_shared<Session>("vit16", 1000, 200);
-    auto s2 = std::make_shared<Session>("resnet18", 2000, 1000);
-    auto s3 = std::make_shared<Session>("efficientnetb0", 500, 500);
-    sessionList.push_back(s1);
-    sessionList.push_back(s2);
-    sessionList.push_back(s3);
+    // std::vector<std::shared_ptr<Session>> sessionList;
+    // auto s1 = std::make_shared<Session>("vit16", 1000, 200);
+    // auto s2 = std::make_shared<Session>("resnet18", 2000, 1000);
+    // auto s3 = std::make_shared<Session>("efficientnetb0", 500, 500);
+    // sessionList.push_back(s1);
+    // sessionList.push_back(s2);
+    // sessionList.push_back(s3);
 
-    std::cout << "Running generation\n";
-    auto nodeList = test->generate_schedule(sessionList);
-    for(int i=0;i<nodeList.size();i++) {
-        auto node = nodeList[i];
-        std::cout << "NODE NUMBER: " << i+1 << std::endl;
-        node->pretty_print();
-    }
+    // std::cout << "Running generation\n";
+    // auto nodeList = test->generate_schedule(sessionList);
+    // for(int i=0;i<nodeList.size();i++) {
+    //     auto node = nodeList[i];
+    //     std::cout << "NODE NUMBER: " << i+1 << std::endl;
+    //     node->pretty_print();
+    // }
+
     // // Initialize request processors
     // std::map<std::string, RequestProcessor*> request_processors;
     // for(auto m:models) {

@@ -10,8 +10,14 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/external/concurrentqueue)
 include_directories(${PROJECT_SOURCE_DIR}/external/csvparser)
 
+# add onnxruntime library
+set(ONNXRUNTIME_DIR "${PROJECT_SOURCE_DIR}/external/onnxruntime-linux-x64-gpu-1.21.1")
+
+include_directories(${PROJECT_SOURCE_DIR}/external/onnxruntime-linux-x64-gpu-1.21.1/include)
+link_directories(${PROJECT_SOURCE_DIR}/external/onnxruntime-linux-x64-gpu-1.21.1/lib)
+
 # Add the executable target
 add_executable(run src/main.cpp src/Simulator.cpp src/RequestProcessor.cpp src/nexus.cpp)
 
 # add target
-target_link_libraries(run)
+target_link_libraries(run PRIVATE onnxruntime)
