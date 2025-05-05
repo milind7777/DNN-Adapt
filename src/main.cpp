@@ -31,6 +31,27 @@ bool endsWith(const std::string &str, const std::string &pattern) {
 }
 
 int main(int argc, char * argv[]) {
+    // int gpu_id = 0;
+    // size_t total_bytes = 64 * 1024 * 1024;
+
+    // cudaError_t err = cudaSetDevice(gpu_id);
+    // if (err != cudaSuccess) {
+    //     std::cerr << "cudaSetDevice failed: " << cudaGetErrorString(err) << "\n";
+    //     return 1;
+    // }
+
+    // float* gpu_ptr = nullptr;
+    // err = cudaMalloc((void**)&gpu_ptr, total_bytes);
+    // if (err != cudaSuccess) {
+    //     std::cerr << "cudaMalloc failed: " << cudaGetErrorString(err) << "\n";
+    //     return 1;
+    // }
+
+    // std::cout << "cudaMalloc succeeded.\n";
+    // cudaFree(gpu_ptr);
+    // return 0;
+
+
     int option_index = 0;
     static struct option long_options[] = {
         {"model_repo", required_argument, 0, 0},
@@ -88,7 +109,7 @@ int main(int argc, char * argv[]) {
     NexusScheduler* test = new NexusScheduler(gpuList, modelNames, profilingFolder);
     
     std::vector<std::shared_ptr<Session>> sessionList;
-    auto s1 = std::make_shared<Session>("vit16", 2000, 20);
+    auto s1 = std::make_shared<Session>("vit16", 2000, 200);
     auto s2 = std::make_shared<Session>("resnet18", 2000, 20);
     auto s3 = std::make_shared<Session>("efficientnetb0", 500, 20);
     sessionList.push_back(s1);
@@ -108,6 +129,20 @@ int main(int argc, char * argv[]) {
         auto node_runner = std::make_shared<NodeRunner>(nodeList[i], i);
         runner_list.push_back(node_runner);
     }
+
+    for(int i=0;i<runner_list.size();i++) {
+        auto runner = runner_list[i];
+        runner->start();
+    }
+
+    for(int i=0;i<runner_list.size();i++) {
+        auto runner = runner_list[i];
+        if(runner->_runner_thread.joinable()) {
+            runner->_runner_thread.join();
+        }
+    }
+
+    std::cout << "Exiting main program\n";
     // NodeRunner node_runner = NodeRunner(nodeList[0], 0);
 
     // // Initialize request processors
