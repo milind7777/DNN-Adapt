@@ -11,11 +11,11 @@ const int RATE_CALCULATION_DURATION = 3; // the time window in seconds over whic
 
 struct InferenceRequest {
     std::string model_name;
-    std::string input_file_path;
-    time_t arrival_time;
+    int request_count;
+    int64_t arrival_time; // set at executor before system puts it in a queue
 
-    InferenceRequest(const std::string& model, const std::string& path)
-        : model_name(model), input_file_path(path),
+    InferenceRequest(const std::string& model, int request_count, int64_t arrival_time=0)
+        : model_name(model), request_count(request_count),
           arrival_time(0) {}
 };
 
@@ -27,10 +27,14 @@ struct Slot {
 class RequestProcessor {
 private:
     moodycamel::ConcurrentQueue<std::shared_ptr<InferenceRequest>> queue;
+    std::shared_ptr<InferenceRequest> buffer = nullptr;
     std::array<Slot, (size_t)(RATE_CALCULATION_DURATION+1)> slots;
+    std::string model_name;
+    int _id = 0;
+    std::mutex _lock_batch;
     
 public:
-    void register_request(std::shared_ptr<InferenceRequest> req, int batch_size=1);
+    void register_request(std::shared_ptr<InferenceRequest> req);
     std::vector<std::shared_ptr<InferenceRequest>> form_batch(int batch_size);
     size_t get_size() const;
     double get_request_rate();

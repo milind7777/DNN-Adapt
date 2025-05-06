@@ -2,11 +2,13 @@
 #include <iostream>
 
 /*
-   NOTE: For the purpose of simulation when batch size is specified the same request is logged multiple times
+   NOTE: We do not care about the different inputs for each request for the purpose of these experiments, we only care about the request counts
 */
-void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req, int batch_size) {
+void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
+    // get request count
+    int request_count = req->request_count;
     // recording request rate
-    auto now = std::chrono::steady_clock::now();
+    auto now = std::chrono::high_resolution_clock::now();
     long current_second = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
     auto slot_index = current_second % (RATE_CALCULATION_DURATION + 1);
     Slot& slot = slots[slot_index]; 
@@ -17,34 +19,76 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req, i
         slot.counter.store(0, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_relaxed);
         slot.last_active_second.store(current_second, std::memory_order_release);
-        slot.counter.fetch_add(batch_size, std::memory_order_relaxed);
+        slot.counter.fetch_add(request_count, std::memory_order_relaxed);
     } else {
-        slot.counter.fetch_add(batch_size, std::memory_order_relaxed);
+        slot.counter.fetch_add(request_count, std::memory_order_relaxed);
     }
     
-    // add requests to queue
-    for(int i=0;i<batch_size;i++) {
-        auto request_copy = std::make_shared<InferenceRequest>(*req);
-        request_copy->arrival_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        queue.enqueue(request_copy);
+    // add request to queue
+    auto request_copy = std::make_shared<InferenceRequest>(*req);
+    request_copy->arrival_time = std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()
+    ).count();;
+    queue.enqueue(request_copy);
+}
+
+int RequestProcessor::form_batch(int batch_size) {
+    int batch_cur = 0;
+    int64_t last_request_arrival_time;
+    std::vector<std::pair<int, int64_t>> batch_timing_info;
+    
+    // acquire lock to prevent parallel batch forming
+    _lock_batch.lock();
+
+    // try to form batch from buffer first
+    if(buffer != nullptr) {
+        if(buffer->request_count > batch_size) {
+            buffer->request_count -= batch_size;
+            batch_cur = batch_size;
+            batch_timing_info.push_back(batch_size, buffer->arrival_time);
+        } else {
+            batch_cur = buffer->request_count;
+            batch_timing_info.push_back(buffer->request_count, buffer->arrival_time);
+            buffer = nullptr;
+        }
     }
+
+    // try to form from the request queue
+    while(batch_cur < batch_size) {
+        std::shared_ptr<InferenceRequest> request;
+        if(buffer.try_dequeue(request)) {
+            last_request_arrival_time = request->arrival_time;
+            batch_timing_info.push_back({min(request->request_count, batch_size - batch_cur), request->arrival_time});
+            batch_cur += request->request_count;
+        } else {
+            break;
+        }
+    }
+
+    if(batch_cur > batch_size) {
+        buffer = std::make_shared<InferenceRequest>(model_name, batch_cur-batch_size, last_request_arrival_time);
+        batch_cur = batch_size;
+    }
+    
+    // release lock
+    _lock_batch.unlock();
+
+    // log the batch timing info
+    std::cout << "BATCH FORMED: " << model_name << std::endl;
+    for(auto entry:batch_timing_info) {
+        std::cout << "request_count: " << entry.first << ", arrival_time: " << entry.second << std::endl;
+    }
+    
+    return batch_cur;
 }
 
-std::vector<std::shared_ptr<InferenceRequest>> RequestProcessor::form_batch(int batch_size) {
-    std::vector<std::shared_ptr<InferenceRequest>> batch;
-    batch.reserve(batch_size);
-    size_t count = queue.try_dequeue_bulk(std::back_inserter(batch), batch_size);
-    batch.resize(count); // Actual number of dequeued items
-    return batch;
-}
-
-// Approximate queue size (thread-safe)
+// Approximate queue size (thread-safe) - useless now
 size_t RequestProcessor::get_size() const {
     return queue.size_approx();
 }
 
 double RequestProcessor::get_request_rate() {
-    const auto now = std::chrono::steady_clock::now();
+    const auto now = std::chrono::high_resolution_clock::now();
     auto time_since_epoch = now.time_since_epoch();
     auto current_second = std::chrono::duration_cast<std::chrono::seconds>(time_since_epoch).count();
 

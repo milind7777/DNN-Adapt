@@ -220,6 +220,17 @@ private:
     bool pedningUpdate;
     Node new_node;
 
+    static void CUDART_CB log_callback(void* user_data) {
+        auto tag = static_cast<std::string*>(user_data);
+    
+        auto now = std::chrono::high_resolution_clock::now();
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    
+        std::cout << "BATCH PROCESSED: " << tag << "@" << now_us << "\n";
+
+        delete tag;
+    }
+
     void run() {
         std::cout << "NodeRunner run()\n";
         CUDACHECK(cudaSetDevice(gpu_id));
@@ -251,6 +262,15 @@ private:
                     auto ort_ptr = ort_list[i].first;
                     std::cout << "run(): launching inference on ORTRunner\n";
                     ort_ptr->run_inference(session_ptr->batch_size);
+
+                    // add logging callback
+                    auto* model_name_copy = new std::string(session_ptr->model_name);
+                    cudaLaunchHostFunc(
+                        ort_ptr->_runner_stream,
+                        log_callback,
+                        static_cast<void*>(model_name_copy) 
+                    );
+
                     running_streams.push_back(ort_ptr->_runner_stream);
                 } if (running_streams.size()) {
                     // wait for all running streams to complete

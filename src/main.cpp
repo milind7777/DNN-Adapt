@@ -54,28 +54,54 @@ int main(int argc, char * argv[]) {
 
     int option_index = 0;
     static struct option long_options[] = {
-        {"model_repo", required_argument, 0, 0},
+        {"model_repo", required_argument, nullptr, 'm'},
+        {"run_name", required_argument, nullptr, 'r'},
         {0, 0, 0, 0}
     };
     
     int opt;
     std::string model_dir = "";
-    while((opt = getopt_long_only(argc, argv, "m:", long_options, &option_index)) != -1) {
+    std::string run_name = "";
+    while((opt = getopt_long_only(argc, argv, "m:r:", long_options, &option_index)) != -1) {
         switch(opt) {
-            case 0:
-                // std::cout << "option name" << long_options[option_index].name << std::endl;
-                model_dir = optarg;
-                break;
             case 'm':
                 model_dir = optarg;
                 break;
+            case 'r':
+                run_name = optarg;
+                break;
             default:
-                std::cout << "bad??" << std::endl;
+                std::cerr << "Usage: " << argv[0] << " --model_repo <dir> --run_name <name>\n";
+                exit(1);
         }
+    }
+
+    if (model_dir.empty()) {
+        std::cerr << "Error: --model_repo, -m is required\n";
+        exit(EXIT_FAILURE);
+    }
+    
+    if (run_name.empty()) {
+        std::cerr << "Error: --run_name, -r is required\n";
+        exit(EXIT_FAILURE);
     }
 
     if(!pathExists(model_dir)) {
         std::cout << "Model repo path provided - " << model_dir << ", does not exist!" << std::endl;
+        exit(1);
+    }
+
+    std::filesystem::path run_dir = std::filesystem::path("logs") / run_name;
+
+    try {
+        if (std::filesystem::exists(run_dir)) {
+            std::filesystem::remove_all(run_dir);
+        }
+
+        std::filesystem::create_directories(run_dir);
+        std::cout << "Ready log directory: " << run_dir << "\n";
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Filesystem error: " << e.what() << "\n";
         exit(1);
     }
     
