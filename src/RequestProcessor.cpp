@@ -7,6 +7,7 @@
 void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     // get request count
     int request_count = req->request_count;
+
     // recording request rate
     auto now = std::chrono::high_resolution_clock::now();
     long current_second = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -45,10 +46,10 @@ int RequestProcessor::form_batch(int batch_size) {
         if(buffer->request_count > batch_size) {
             buffer->request_count -= batch_size;
             batch_cur = batch_size;
-            batch_timing_info.push_back(batch_size, buffer->arrival_time);
+            batch_timing_info.push_back({batch_size, buffer->arrival_time});
         } else {
             batch_cur = buffer->request_count;
-            batch_timing_info.push_back(buffer->request_count, buffer->arrival_time);
+            batch_timing_info.push_back({buffer->request_count, buffer->arrival_time});
             buffer = nullptr;
         }
     }
@@ -56,9 +57,9 @@ int RequestProcessor::form_batch(int batch_size) {
     // try to form from the request queue
     while(batch_cur < batch_size) {
         std::shared_ptr<InferenceRequest> request;
-        if(buffer.try_dequeue(request)) {
+        if(queue.try_dequeue(request)) {
             last_request_arrival_time = request->arrival_time;
-            batch_timing_info.push_back({min(request->request_count, batch_size - batch_cur), request->arrival_time});
+            batch_timing_info.push_back({std::min(request->request_count, batch_size - batch_cur), request->arrival_time});
             batch_cur += request->request_count;
         } else {
             break;

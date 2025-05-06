@@ -136,11 +136,11 @@ int main(int argc, char * argv[]) {
     
     std::vector<std::shared_ptr<Session>> sessionList;
     auto s1 = std::make_shared<Session>("vit16", 2000, 200);
-    auto s2 = std::make_shared<Session>("resnet18", 2000, 20);
-    auto s3 = std::make_shared<Session>("efficientnetb0", 500, 20);
+    // auto s2 = std::make_shared<Session>("resnet18", 2000, 20);
+    // auto s3 = std::make_shared<Session>("efficientnetb0", 500, 20);
     sessionList.push_back(s1);
-    sessionList.push_back(s2);
-    sessionList.push_back(s3);
+    // sessionList.push_back(s2);
+    // sessionList.push_back(s3);
 
     std::cout << "Running generation\n";
     auto nodeList = test->generate_schedule(sessionList);
@@ -150,9 +150,15 @@ int main(int argc, char * argv[]) {
         node->pretty_print();
     }
 
+    // Initialize request processors
+    std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
+    for(auto [model_name, _]:models) {
+        request_processors[model_name] = std::make_shared<RequestProcessor>(model_name);
+    }
+
     std::vector<std::shared_ptr<NodeRunner>> runner_list;
     for(int i=0;i<nodeList.size();i++) {
-        auto node_runner = std::make_shared<NodeRunner>(nodeList[i], i);
+        auto node_runner = std::make_shared<NodeRunner>(nodeList[i], i, request_processors);
         runner_list.push_back(node_runner);
     }
 
@@ -161,27 +167,18 @@ int main(int argc, char * argv[]) {
         runner->start();
     }
 
-    for(int i=0;i<runner_list.size();i++) {
-        auto runner = runner_list[i];
-        if(runner->_runner_thread.joinable()) {
-            runner->_runner_thread.join();
-        }
-    }
-
-    std::cout << "Exiting main program\n";
-    // NodeRunner node_runner = NodeRunner(nodeList[0], 0);
-
-    // // Initialize request processors
-    // std::map<std::string, RequestProcessor*> request_processors;
-    // for(auto m:models) {
-    //     request_processors[m.first] = new RequestProcessor();
+    // for(int i=0;i<runner_list.size();i++) {
+    //     auto runner = runner_list[i];
+    //     if(runner->_runner_thread.joinable()) {
+    //         runner->_runner_thread.join();
+    //     }
     // }
 
-    // // start simulator thread
-    // Simulator sim(request_processors);
-    // std::thread sim_thread(&Simulator::run, &sim);
+    // start simulator thread
+    Simulator sim(request_processors);
+    std::thread sim_thread(&Simulator::run, &sim);
 
-    // // manual check for dynamic request generator and get request rate
+    // manual check for dynamic request generator and get request rate
     // int total_req_count[3] = {0};
     // int new_req_count[3]   = {0};
     // int request_rate[3]    = {0};
@@ -201,9 +198,10 @@ int main(int argc, char * argv[]) {
     //     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     // }
     
-    // // Wait for thread to complete
-    // sim_thread.join();
+    // Wait for thread to complete
+    sim_thread.join();
 
+    std::cout << "Exiting main program\n";
     munmap(mappedBin.data_ptr, mappedBin.file_size);
     return 0;
 }

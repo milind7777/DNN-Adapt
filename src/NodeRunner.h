@@ -49,6 +49,7 @@ public:
     }
 
     void run_inference(int batch_size) {
+        if(batch_size == 0) return; 
         size_t total_elements = batch_size * CHANNELS * HEIGHT * WIDTH;
         size_t total_bytes = total_elements * sizeof(float);
 
@@ -140,7 +141,9 @@ class NodeRunner {
 
     // TO DO: Move all function bodies to .cpp file
 public:
-    NodeRunner(std::shared_ptr<Node> node, int gpu_id): running_node(*node), gpu_id(gpu_id) {
+    NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors): 
+            running_node(*node), gpu_id(gpu_id), request_processors(request_processors) 
+    {
         // initialize ORTRunners for each session in node schedule
         std::cout << "NodeRunner CONSTRUCTOR START\n";
         cudaSetDevice(gpu_id);
@@ -226,7 +229,7 @@ private:
         auto now = std::chrono::high_resolution_clock::now();
         auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     
-        std::cout << "BATCH PROCESSED: " << tag << "@" << now_us << "\n";
+        std::cout << "BATCH PROCESSED: " << *tag << "@" << now_us << "\n";
 
         delete tag;
     }
@@ -258,10 +261,13 @@ private:
                         running_streams.clear();
                     }
 
+                    // get batch from request processor
+                    auto batch_current = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size);
+
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
                     std::cout << "run(): launching inference on ORTRunner\n";
-                    ort_ptr->run_inference(session_ptr->batch_size);
+                    ort_ptr->run_inference(batch_current);
 
                     // add logging callback
                     auto* model_name_copy = new std::string(session_ptr->model_name);
@@ -306,6 +312,7 @@ private:
     int gpu_id;
     Node running_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> ort_list;
+    std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
 };
 
 #endif

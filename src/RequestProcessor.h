@@ -34,8 +34,9 @@ private:
     std::mutex _lock_batch;
     
 public:
+    RequestProcessor(std::string model_name): model_name(model_name) {};
     void register_request(std::shared_ptr<InferenceRequest> req);
-    std::vector<std::shared_ptr<InferenceRequest>> form_batch(int batch_size);
+    int form_batch(int batch_size);
     size_t get_size() const;
     double get_request_rate();
 };

@@ -7,10 +7,10 @@
 
 class Simulator {
 private:
-    const std::map<std::string, RequestProcessor*> &request_processors;
+    std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
 
 public:
-    Simulator(std::map<std::string, RequestProcessor*> &_request_processors): request_processors(_request_processors) {};
+    Simulator(std::map<std::string, std::shared_ptr<RequestProcessor>> _request_processors): request_processors(_request_processors) {};
     void run();
 };
 

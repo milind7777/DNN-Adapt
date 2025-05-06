@@ -26,7 +26,7 @@ enum class rate_type {
     exponential_decay
 };
 
-void dynamic_request_rate_generator(RequestProcessor* req_processor, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>> &schedule, std::shared_ptr<InferenceRequest> request) {
+void dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_processor, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>> &schedule, std::shared_ptr<InferenceRequest> request) {
     using namespace std::chrono;
     
     double steady_rate = 0;
@@ -82,7 +82,8 @@ void dynamic_request_rate_generator(RequestProcessor* req_processor, std::vector
             residual_fraction = std::modf(request_count, &request_count_floor);
 
             // register requests
-            req_processor->register_request(request, int(request_count_floor));
+            request->request_count = request_count_floor;
+            req_processor->register_request(request);
 
             // put thread to sleep for remaining time
             auto end_time = steady_clock::now();
@@ -105,17 +106,17 @@ void Simulator::run() {
 
     std::map<std::string, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>>> schedules;
 
-    schedules["efficientnetb0"] = {
-        {rate_type::ramp, {5, {10}}},
-        {rate_type::flat, {20, {50}}},
-        {rate_type::ramp, {5, {-10}}}
-    };
+    // schedules["efficientnetb0"] = {
+    //     {rate_type::ramp, {5, {10}}},
+    //     {rate_type::flat, {20, {50}}},
+    //     {rate_type::ramp, {5, {-10}}}
+    // };
 
-    schedules["resnet18"] = {
-        {rate_type::ramp, {5, {2}}},
-        {rate_type::burst, {10, {10, 1}}},
-        {rate_type::exponential_decay, {15, {0.5}}}
-    };
+    // schedules["resnet18"] = {
+    //     {rate_type::ramp, {5, {2}}},
+    //     {rate_type::burst, {10, {10, 1}}},
+    //     {rate_type::exponential_decay, {15, {0.5}}}
+    // };
 
     schedules["vit16"] = {
         {rate_type::ramp, {5, {2}}},
@@ -126,7 +127,7 @@ void Simulator::run() {
     // Launch threads for each model
     std::vector<std::thread> threads;
     for(const auto& [model_name, processor]: request_processors) {
-        auto request = std::make_shared<InferenceRequest>(model_name, "images/sample.png");
+        auto request = std::make_shared<InferenceRequest>(model_name, 1);
         threads.emplace_back(dynamic_request_rate_generator, processor, std::ref(schedules[model_name]), request);
     }
 
