@@ -17,6 +17,7 @@
 #include "nexus.h"
 #include "NodeRunner.h"
 #include "imageInput.h"
+#include  "Logger.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -51,7 +52,7 @@ int main(int argc, char * argv[]) {
     // cudaFree(gpu_ptr);
     // return 0;
 
-
+    
     int option_index = 0;
     static struct option long_options[] = {
         {"model_repo", required_argument, nullptr, 'm'},
@@ -86,28 +87,30 @@ int main(int argc, char * argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if(!pathExists(model_dir)) {
-        std::cout << "Model repo path provided - " << model_dir << ", does not exist!" << std::endl;
-        exit(1);
-    }
-
-    std::filesystem::path run_dir = std::filesystem::path("logs") / run_name;
-
-    try {
-        if (std::filesystem::exists(run_dir)) {
-            std::filesystem::remove_all(run_dir);
-        }
-
-        std::filesystem::create_directories(run_dir);
-        std::cout << "Ready log directory: " << run_dir << "\n";
-    } catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Filesystem error: " << e.what() << "\n";
-        exit(1);
+    // Initialize the logger
+    if (!Logger::getInstance().initialize("logs", run_name, Logger::Level::INFO, Logger::Level::TRACE)) {
+        std::cerr << "Failed to initialize logging system. Exiting.\n";
+        exit(EXIT_FAILURE);
     }
     
+    // Get the main logger
+    auto logger = Logger::getInstance().getLogger("main");
+    if (!logger) {
+        std::cerr << "Failed to get logger. Exiting.\n";
+        exit(EXIT_FAILURE);
+    }
+    
+    LOG_INFO(logger, "DNN-Adapt starting with run_name: {}, model_repo: {}", run_name, model_dir);
+    //logger->flush(); // Force flush after important messages
+
+    if(!pathExists(model_dir)) {
+        LOG_CRITICAL(logger, "Model repo path provided - {}, does not exist!", model_dir);
+        //logger->flush();
+        exit(1);
+    }
+ 
     std::map<std::string, std::string> models;
     for (const auto& entry : std::filesystem::directory_iterator(model_dir)) {
-        // std::cout << entry.path().filename().string() << std::endl;
         auto file_name = entry.path().filename().string();
         if(endsWith(file_name, ".onnx")) {
             auto model_name = file_name.substr(0, file_name.find('.'));
@@ -117,7 +120,9 @@ int main(int argc, char * argv[]) {
 
     // testing mmap for bin file
     auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");
-    std::cout << mappedBin.file_size << std::endl;
+    LOG_INFO(logger, "Mapped bin file: {}, size: {}", (void*)mappedBin.data_ptr, mappedBin.file_size);
+    //logger->flush();
+
     
     std::vector<std::shared_ptr<Gpu>> gpuList;
     auto gpu1 = std::make_shared<Gpu>("A6000", 48);
@@ -142,11 +147,14 @@ int main(int argc, char * argv[]) {
     // sessionList.push_back(s2);
     // sessionList.push_back(s3);
 
-    std::cout << "Running generation\n";
+    LOG_INFO(logger, "Running generation");
+
     auto nodeList = test->generate_schedule(sessionList);
     for(int i=0;i<nodeList.size();i++) {
         auto node = nodeList[i];
-        std::cout << "NODE NUMBER: " << i+1 << std::endl;
+        //LOG_INFO(logger, "Node {}: GPU: {}, Duty Cycle: {}", i+1, node->gpu.gpu_type, node->duty_cycle);
+        //LOG_INFO(logger, "Session List: ");
+        LOG_INFO(logger, "NODE NUMBER: {}", i+1);
         node->pretty_print();
     }
 
@@ -201,7 +209,13 @@ int main(int argc, char * argv[]) {
     // Wait for thread to complete
     sim_thread.join();
 
-    std::cout << "Exiting main program\n";
+    LOG_INFO(logger, "Exiting main program");
+    logger->flush();
+    
+    // Short delay to ensure flush completes
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    Logger::getInstance().shutdown();
     munmap(mappedBin.data_ptr, mappedBin.file_size);
     return 0;
 }
