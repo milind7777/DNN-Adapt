@@ -141,7 +141,7 @@ class NodeRunner {
 
     // TO DO: Move all function bodies to .cpp file
 public:
-    NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors): 
+    NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::shared_ptr<RequestProcessor>> &request_processors): 
             running_node(*node), gpu_id(gpu_id), request_processors(request_processors) 
     {
         // initialize ORTRunners for each session in node schedule
@@ -300,10 +300,12 @@ private:
             }
 
             // check if update is needded
-            _update.lock();
             if(pedningUpdate) {
+                _update.lock();
                 // update node with new_node
-            } _update.unlock();
+
+                _update.unlock();
+            }
         }
     }
 

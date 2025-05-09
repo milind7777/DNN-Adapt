@@ -18,6 +18,7 @@
 #include "NodeRunner.h"
 #include "imageInput.h"
 #include  "Logger.h"
+#include "Executor.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -32,27 +33,7 @@ bool endsWith(const std::string &str, const std::string &pattern) {
 }
 
 int main(int argc, char * argv[]) {
-    // int gpu_id = 0;
-    // size_t total_bytes = 64 * 1024 * 1024;
-
-    // cudaError_t err = cudaSetDevice(gpu_id);
-    // if (err != cudaSuccess) {
-    //     std::cerr << "cudaSetDevice failed: " << cudaGetErrorString(err) << "\n";
-    //     return 1;
-    // }
-
-    // float* gpu_ptr = nullptr;
-    // err = cudaMalloc((void**)&gpu_ptr, total_bytes);
-    // if (err != cudaSuccess) {
-    //     std::cerr << "cudaMalloc failed: " << cudaGetErrorString(err) << "\n";
-    //     return 1;
-    // }
-
-    // std::cout << "cudaMalloc succeeded.\n";
-    // cudaFree(gpu_ptr);
-    // return 0;
-
-    
+    // argument processing
     int option_index = 0;
     static struct option long_options[] = {
         {"model_repo", required_argument, nullptr, 'm'},
@@ -109,6 +90,7 @@ int main(int argc, char * argv[]) {
         exit(1);
     }
  
+    // generate mapping from model names to onnx files
     std::map<std::string, std::string> models;
     for (const auto& entry : std::filesystem::directory_iterator(model_dir)) {
         auto file_name = entry.path().filename().string();
@@ -118,45 +100,33 @@ int main(int argc, char * argv[]) {
         }
     }
 
-    // testing mmap for bin file
+    std::vector<std::string> modelNames;
+    for(auto model:models) {
+        modelNames.push_back(model.first);
+    }
+
+    // populate SLO latencies for each model in ms
+    std::map<std::string, double> latencies;
+    latencies["vit16"] = 1000.0;
+    latencies["resnet18"] = 500.0;
+    latencies["efficientnetb0"] = 200.0;
+
+    // generate mmap for image bin file
     auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");
     LOG_INFO(logger, "Mapped bin file: {}, size: {}", (void*)mappedBin.data_ptr, mappedBin.file_size);
     //logger->flush();
 
     
+    // Initialize system GPU info
+    // TO DO: can be automated?
     std::vector<std::shared_ptr<Gpu>> gpuList;
     auto gpu1 = std::make_shared<Gpu>("A6000", 48);
     auto gpu2 = std::make_shared<Gpu>("A6000", 48);
     gpuList.push_back(gpu1);
     gpuList.push_back(gpu2);
 
-    std::vector<std::string> modelNames;
-    for(auto model:models) {
-        modelNames.push_back(model.first);
-    }
-
+    // path to profiling folder
     std::string profilingFolder = "models/profiles/sample";
-
-    NexusScheduler* test = new NexusScheduler(gpuList, modelNames, profilingFolder);
-    
-    std::vector<std::shared_ptr<Session>> sessionList;
-    auto s1 = std::make_shared<Session>("vit16", 2000, 200);
-    // auto s2 = std::make_shared<Session>("resnet18", 2000, 20);
-    // auto s3 = std::make_shared<Session>("efficientnetb0", 500, 20);
-    sessionList.push_back(s1);
-    // sessionList.push_back(s2);
-    // sessionList.push_back(s3);
-
-    LOG_INFO(logger, "Running generation");
-
-    auto nodeList = test->generate_schedule(sessionList);
-    for(int i=0;i<nodeList.size();i++) {
-        auto node = nodeList[i];
-        //LOG_INFO(logger, "Node {}: GPU: {}, Duty Cycle: {}", i+1, node->gpu.gpu_type, node->duty_cycle);
-        //LOG_INFO(logger, "Session List: ");
-        LOG_INFO(logger, "NODE NUMBER: {}", i+1);
-        node->pretty_print();
-    }
 
     // Initialize request processors
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
@@ -164,47 +134,15 @@ int main(int argc, char * argv[]) {
         request_processors[model_name] = std::make_shared<RequestProcessor>(model_name);
     }
 
-    std::vector<std::shared_ptr<NodeRunner>> runner_list;
-    for(int i=0;i<nodeList.size();i++) {
-        auto node_runner = std::make_shared<NodeRunner>(nodeList[i], i, request_processors);
-        runner_list.push_back(node_runner);
-    }
+    // Initialize executor
+    auto executor = std::make_shared<Executor>(gpuList, modelsList, request_processors, latencies);
 
-    for(int i=0;i<runner_list.size();i++) {
-        auto runner = runner_list[i];
-        runner->start();
-    }
-
-    // for(int i=0;i<runner_list.size();i++) {
-    //     auto runner = runner_list[i];
-    //     if(runner->_runner_thread.joinable()) {
-    //         runner->_runner_thread.join();
-    //     }
-    // }
+    // Start executor
+    executor->start();
 
     // start simulator thread
     Simulator sim(request_processors);
     std::thread sim_thread(&Simulator::run, &sim);
-
-    // manual check for dynamic request generator and get request rate
-    // int total_req_count[3] = {0};
-    // int new_req_count[3]   = {0};
-    // int request_rate[3]    = {0};
-    // for(int i=0;i<30;i++) {
-    //     int j = 0;
-    //     for(const auto &[model_name, processor]: request_processors) {
-    //         total_req_count[j] = processor->get_size();
-    //         processor->form_batch(total_req_count[j]);
-    //         request_rate[j] = processor->get_request_rate();
-    //         j++;
-    //     }
-
-    //     for(int k=0;k<3;k++) {
-    //         std::cout << "<" << request_rate[k] << "> ";
-    //     } std::cout << std::endl;
-
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    // }
     
     // Wait for thread to complete
     sim_thread.join();

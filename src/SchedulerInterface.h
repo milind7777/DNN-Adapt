@@ -60,8 +60,8 @@ struct Node {
 class Scheduler {
     public:
         Scheduler(const std::vector<std::shared_ptr<Gpu>>& gpus,
-                  const std::vector<std::string>& models,
-                  const std::string& profiling_folder): gpus_(gpus), models_(models), profiling_folder_(profiling_folder) {};
+                  const std::vector<std::string> models,
+                  const std::string profiling_folder): gpus_(gpus), models_(models), profiling_folder_(profiling_folder) {};
     
         virtual ~Scheduler() = default;
     
