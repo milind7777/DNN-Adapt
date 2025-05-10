@@ -3,6 +3,7 @@
 
 #include "SchedulerInterface.h"
 #include "imageInput.h"
+#include "Logger.h"
 #include <iostream>
 #include <string>
 #include <thread>
@@ -49,31 +50,30 @@ public:
     }
 
     void run_inference(int batch_size) {
+        auto logger = Logger::getInstance().getLogger("NodeRunner");
+        if (!logger) {
+            std::cerr << "Failed to get logger. Exiting.\n";
+            exit(EXIT_FAILURE);
+        }
+        
         if(batch_size == 0) return; 
         size_t total_elements = batch_size * CHANNELS * HEIGHT * WIDTH;
         size_t total_bytes = total_elements * sizeof(float);
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
-        std::cout << "CUDA free memory: " << free_mem << " bytes\n";
-        std::cout << "Thread [" << std::this_thread::get_id()
-        << "] using GPU " << _gpu_id << std::endl;
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
-        std::cout << "run_inference(): cuda malloc" << total_bytes << "\n";
         CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
 
         // copy input image over to GPU memory
-        std::cout << "run_inference(): mem cpy async\n";
-        
         assert(gpu_ptr != nullptr);
         cudaPointerAttributes attr;
         cudaPointerGetAttributes(&attr, gpu_ptr);
         assert(attr.type == cudaMemoryTypeDevice);
         
         assert(gMappedImageBin.data_ptr != nullptr);
-        std::cout << "First float: " << gMappedImageBin.data_ptr[0] << std::endl;
 
         assert(total_bytes > 0 && total_bytes < 1ULL << 32);
         
@@ -95,7 +95,8 @@ public:
             input_shape.size()
         );
 
-        std::cout << "run_inference session.Run()\n";
+        LOG_INFO(logger, "Queueing Inference on {} with batch size {}", _runner_name, batch_size);
+        logger->flush();
         try {
             auto output_tensor = _session.Run(
                 Ort::RunOptions{nullptr},
@@ -145,7 +146,6 @@ public:
             running_node(*node), gpu_id(gpu_id), request_processors(request_processors) 
     {
         // initialize ORTRunners for each session in node schedule
-        std::cout << "NodeRunner CONSTRUCTOR START\n";
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: running_node.session_list) {
             Ort::SessionOptions gpu_session_options;
@@ -162,8 +162,6 @@ public:
             gpu_session_options.AppendExecutionProvider_CUDA(cuda_options);
 
             const std::string onnx_file_path = "models/" + session_ptr->model_name + ".onnx";
-            
-            std::cout << "Initializing ORTRunner for model: " << session_ptr->model_name << std::endl;
             std::shared_ptr<ORTRunner> ort_ptr;
             try { 
                 ort_ptr = std::make_shared<ORTRunner>(
@@ -186,20 +184,76 @@ public:
             std::cout << "Finished ORTRunner for model: " << session_ptr->model_name << std::endl;
             ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
         }
-        std::cout << "NodeRunner CONSTRUCTOR END\n";
     }
 
     void updateNode(Node updated_node) {
         _update.lock();
-        new_node = updated_node;
-        pedningUpdate = true;
+
+        cudaSetDevice(gpu_id);
+        for(auto& [session_ptr, _]: updated_node.session_list) {
+            auto model_name = session_ptr->model_name;
+
+            // check if model name already exists in existing sesison list
+            // if it does.. use the corresponding ort runner
+            // if not create new runner and add to list
+            int existingInd = -1;
+            for(int i=0;i<running_node.session_list.size();i++) {
+                auto cur_session_ptr = running_node.session_list[i].first;
+                auto cur_model_name = cur_session_ptr->model_name;
+                if(model_name == cur_model_name) {
+                    existingInd = i;
+                    break;
+                }
+            }
+
+            if(existingInd != -1) {
+                update_ort_list.push_back(ort_list[existingInd]);
+            } else {
+                Ort::SessionOptions gpu_session_options;
+                OrtCUDAProviderOptions cuda_options;
+                cuda_options.device_id = gpu_id;
+
+                cudaStream_t ort_stream;
+                cudaError_t err = cudaStreamCreate(&ort_stream);
+                if(err != cudaSuccess) {
+                    throw std::runtime_error("Faile to create CUDA stream in ORTRunner");
+                }
+                cuda_options.has_user_compute_stream = 1;
+                cuda_options.user_compute_stream = static_cast<void*> (ort_stream);
+                gpu_session_options.AppendExecutionProvider_CUDA(cuda_options);
+            
+                const std::string onnx_file_path = "models/" + session_ptr->model_name + ".onnx";
+                std::shared_ptr<ORTRunner> ort_ptr;
+                try { 
+                    ort_ptr = std::make_shared<ORTRunner>(
+                        onnx_file_path, 
+                        std::move(gpu_session_options), 
+                        "ORTRunner_" + std::to_string(gpu_id),
+                        std::move(ort_stream),
+                        gpu_id
+                    );
+                } catch (const Ort::Exception& e) {
+                    std::cerr << "ONNX Runtime error: " << e.what() << std::endl;
+                    std::terminate();
+                } catch (const std::exception& e) {
+                    std::cerr << "Standard exception: " << e.what() << std::endl;
+                    std::terminate();
+                } catch (...) {
+                    std::cerr << "Unknown exception occurred while constructing ORTRunner." << std::endl;
+                    std::terminate();
+                }
+                std::cout << "Finished ORTRunner for model: " << session_ptr->model_name << std::endl;
+                update_ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
+            }
+        }
+        
+        update_node = update_node;
+        pendingUpdate = true;
         _update.unlock();
     }
 
     void start() {
-        std::cout << "NodeRunner start()\n";
         if(!_running) _runner_thread = std::thread(&NodeRunner::run, this);
-        std::cout << "NodeRunner thread launched\n";
     }
 
     void stop() {
@@ -217,11 +271,11 @@ public:
 
     std::thread _runner_thread;
 
-
 private:
     std::mutex _update;
-    bool pedningUpdate;
-    Node new_node;
+    bool pendingUpdate;
+    Node update_node;
+    std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> update_ort_list;
 
     static void CUDART_CB log_callback(void* user_data) {
         auto tag = static_cast<std::string*>(user_data);
@@ -235,7 +289,6 @@ private:
     }
 
     void run() {
-        std::cout << "NodeRunner run()\n";
         CUDACHECK(cudaSetDevice(gpu_id));
         _running = true;
         while(_running) {
@@ -243,7 +296,6 @@ private:
 
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
-                std::cout << "run(): Found session list\n";
                 std::vector<cudaStream_t> running_streams;
                 auto schedule_start = std::chrono::steady_clock::now();
                 for(int i=0;i<running_node.session_list.size();i++) {
@@ -251,7 +303,6 @@ private:
                     auto occ_ratio = running_node.session_list[i].second.first;
                     auto is_parallel = running_node.session_list[i].second.second;
 
-                    std::cout << "run(): Session name: " << session_ptr->model_name << "\n";
                     if(is_parallel == 0) {
                         // wait for previous streams to complete
                         for(auto stream:running_streams) {
@@ -266,7 +317,6 @@ private:
 
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
-                    std::cout << "run(): launching inference on ORTRunner\n";
                     ort_ptr->run_inference(batch_current);
 
                     // add logging callback
@@ -280,7 +330,6 @@ private:
                     running_streams.push_back(ort_ptr->_runner_stream);
                 } if (running_streams.size()) {
                     // wait for all running streams to complete
-                    std::cout << "Waiting for all streams to finish\n";
                     for(auto stream:running_streams) {
                         cudaStreamSynchronize(stream);
                     }
@@ -288,7 +337,6 @@ private:
                     running_streams.clear();
                 }
                 
-                std::cout << "Finished running all sessions\n";
                 // wait for remaining time in duty cycle
                 auto schedule_end = std::chrono::steady_clock::now();
                 auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(schedule_end - schedule_start);
@@ -300,10 +348,11 @@ private:
             }
 
             // check if update is needded
-            if(pedningUpdate) {
+            if(pendingUpdate) {
                 _update.lock();
-                // update node with new_node
-
+                    // update node and ort list
+                    running_node = update_node;
+                    ort_list = update_ort_list;
                 _update.unlock();
             }
         }

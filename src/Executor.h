@@ -8,15 +8,15 @@
 class Executor {
 public:
     Executor(std::map<std::string, std::string> &modelsList, 
-             std::vector<>std::vector<std::shared_ptr<Gpu>> &gpuList,
+             std::vector<std::shared_ptr<Gpu>> &gpuList,
              std::map<std::string, std::shared_ptr<RequestProcessor>> &requestProcessorList,
              std::map<std::string, double> &latencies,
              std::string profilingFolder): 
                 _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _latencies(latencies), _profilingFolder(profilingFolder)
     {
         // initialize NodeRunners according to the gpuList
-        auto emptyNode = Node();
         for(int i=0;i<_gpuList.size();i++) {
+            auto emptyNode = std::make_shared<Node>();
             _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _requestProcessorList));
         }
 
@@ -29,7 +29,7 @@ public:
     void start() {
         // start the loop for continuously checking the request rates and updating the schedule
         if(!_running) {
-            _runner_thread = std::thread(&Executor::run(), this);
+            _runner_thread = std::thread(&Executor::run, this);
         }
     };
 
@@ -47,19 +47,19 @@ public:
 private:
     std::vector<std::shared_ptr<Gpu>> _gpuList;
     std::map<std::string, std::string> _modelsList;
-    std::map<std::string, std::shared_ptr<RequestProcessor>> _requestProcessorList
+    std::map<std::string, std::shared_ptr<RequestProcessor>> _requestProcessorList;
     std::map<std::string, double> _latencies;
     std::string _profilingFolder;
     std::vector<std::shared_ptr<NodeRunner>> _nodeRunnersList;
     std::shared_ptr<Scheduler> _scheduler;
     std::thread _runner_thread;
-    std::bool _running;
+    bool _running;
     const int _interval = 5; // in seconds
 
     std::vector<std::shared_ptr<Session>> generate_sessions() {
         std::vector<std::shared_ptr<Session>> sessionList;
         for(auto [model_name, processor]:_requestProcessorList) {
-            sessionList.puah_back(std::make_shared<Session>(model_name, _latencies[model_name], processor->get_request_rate()));
+            sessionList.push_back(std::make_shared<Session>(model_name, _latencies[model_name], processor->get_request_rate()));
         }
 
         return sessionList;
@@ -77,11 +77,12 @@ private:
             // generate new shcedule
             auto nodeList = _scheduler->generate_schedule(sessionList);
 
-            // update NodeRunners with new schedule
             // check to make sure we are not using more than allowed GPUs
             assert(nodeList.size() <= _gpuList.size());
+
+            // update NodeRunners with new schedule
             for(int i=0;i<nodeList.size();i++) {
-                _nodeRunnersList[i]->updateNode(nodeList[i]);
+                _nodeRunnersList[i]->updateNode(*nodeList[i]);
             }
 
             // pause before repeating

@@ -135,7 +135,7 @@ int main(int argc, char * argv[]) {
     }
 
     // Initialize executor
-    auto executor = std::make_shared<Executor>(gpuList, modelsList, request_processors, latencies);
+    auto executor = std::make_shared<Executor>(models, gpuList, request_processors, latencies, profilingFolder);
 
     // Start executor
     executor->start();
