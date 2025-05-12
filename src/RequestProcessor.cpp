@@ -75,9 +75,9 @@ int RequestProcessor::form_batch(int batch_size) {
     _lock_batch.unlock();
 
     // log the batch timing info
-    std::cout << "BATCH FORMED: " << model_name << std::endl;
+    LOG_INFO(_logger, "BATCH FORMED: {}", model_name);
     for(auto entry:batch_timing_info) {
-        std::cout << "request_count: " << entry.first << ", arrival_time: " << entry.second << std::endl;
+        LOG_INFO(_logger, "request_count: {}, arrival_time: {}", entry.first, entry.second);
     }
     
     return batch_cur;

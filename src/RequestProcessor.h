@@ -2,10 +2,12 @@
 #define REQUESTPROCESSOR_H
 
 #include "concurrentqueue.h"
+#include "Logger.h"
 #include <ctime>
 #include <chrono>
 #include <atomic>
 #include <memory>
+#include <iostream>
 
 const int RATE_CALCULATION_DURATION = 3; // the time window in seconds over which request rate is calculated
 
@@ -16,7 +18,7 @@ struct InferenceRequest {
 
     InferenceRequest(const std::string& model, int request_count, int64_t arrival_time=0)
         : model_name(model), request_count(request_count),
-          arrival_time(0) {}
+          arrival_time(arrival_time) {}
 };
 
 struct Slot {
@@ -32,9 +34,17 @@ private:
     std::string model_name;
     int _id = 0;
     std::mutex _lock_batch;
+    std::shared_ptr<spdlog::logger> _logger;
     
 public:
-    RequestProcessor(std::string model_name): model_name(model_name) {};
+    RequestProcessor(std::string model_name): model_name(model_name) {
+        // get logger for request processor
+        _logger = Logger::getInstance().getLogger("RequestProcessor");
+        if (!_logger) {
+            std::cerr << "Failed to get logger for RequestProcessor(). Exiting.\n";
+            exit(EXIT_FAILURE);
+        }
+    };
     void register_request(std::shared_ptr<InferenceRequest> req);
     int form_batch(int batch_size);
     size_t get_size() const;

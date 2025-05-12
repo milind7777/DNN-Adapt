@@ -4,6 +4,7 @@
 #include "SchedulerInterface.h"
 #include "nexus.h"
 #include "NodeRunner.h"
+#include "Logger.h"
 
 class Executor {
 public:
@@ -14,13 +15,22 @@ public:
              std::string profilingFolder): 
                 _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _latencies(latencies), _profilingFolder(profilingFolder)
     {
+        // get logger
+        _logger = Logger::getInstance().getLogger("Executor");
+        if (!_logger) {
+            std::cerr << "Failed to get logger for Executor(). Exiting.\n";
+            exit(EXIT_FAILURE);
+        }
+        
         // initialize NodeRunners according to the gpuList
+        LOG_INFO(_logger, "Initialize NodeRunners");
         for(int i=0;i<_gpuList.size();i++) {
             auto emptyNode = std::make_shared<Node>();
             _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _requestProcessorList));
         }
 
         // initialize scheduler: currently using nexus
+        LOG_INFO(_logger, "Initialize Scheduler");
         std::vector<std::string> modelNames;
         for(auto [name, _]: modelsList) modelNames.push_back(name);
         _scheduler = std::make_shared<NexusScheduler>(_gpuList, modelNames, _profilingFolder);
@@ -29,6 +39,12 @@ public:
     void start() {
         // start the loop for continuously checking the request rates and updating the schedule
         if(!_running) {
+            LOG_INFO(_logger, "Launching Nodes");
+            for(auto runner:_nodeRunnersList) {
+                runner->start();
+            }
+
+            LOG_INFO(_logger, "Launching executor run");
             _runner_thread = std::thread(&Executor::run, this);
         }
     };
@@ -53,13 +69,16 @@ private:
     std::vector<std::shared_ptr<NodeRunner>> _nodeRunnersList;
     std::shared_ptr<Scheduler> _scheduler;
     std::thread _runner_thread;
-    bool _running;
+    bool _running = false;
     const int _interval = 5; // in seconds
+    std::shared_ptr<spdlog::logger> _logger;
 
     std::vector<std::shared_ptr<Session>> generate_sessions() {
         std::vector<std::shared_ptr<Session>> sessionList;
         for(auto [model_name, processor]:_requestProcessorList) {
-            sessionList.push_back(std::make_shared<Session>(model_name, _latencies[model_name], processor->get_request_rate()));
+            auto request_rate = processor->get_request_rate();
+            sessionList.push_back(std::make_shared<Session>(model_name, _latencies[model_name], request_rate));
+            LOG_INFO(_logger, "got {} requests per second for {}", request_rate, model_name);
         }
 
         return sessionList;
@@ -72,6 +91,7 @@ private:
             if(!_running) break;
             
             // get session list by querying request processors
+            LOG_INFO(_logger, "Querying request processors");
             auto sessionList = generate_sessions();
 
             // generate new shcedule

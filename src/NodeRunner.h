@@ -41,6 +41,13 @@ public:
         _runner_stream(std::move(runner_stream)),
         _gpu_id(gpu_id)
     {
+        // get logger for node runner and cuda callback
+        _logger = Logger::getInstance().getLogger("ORTRunner");
+        if (!_logger) {
+            std::cerr << "Failed to get logger for NodeRunner(). Exiting.\n";
+            exit(EXIT_FAILURE);
+        }
+        
         _session_options = std::move(session_options);
         _session = Ort::Session(_env, onnx_file_path.c_str(), _session_options);
     }
@@ -49,13 +56,7 @@ public:
         cudaStreamDestroy(_runner_stream);
     }
 
-    void run_inference(int batch_size) {
-        auto logger = Logger::getInstance().getLogger("NodeRunner");
-        if (!logger) {
-            std::cerr << "Failed to get logger. Exiting.\n";
-            exit(EXIT_FAILURE);
-        }
-        
+    void run_inference(int batch_size) {        
         if(batch_size == 0) return; 
         size_t total_elements = batch_size * CHANNELS * HEIGHT * WIDTH;
         size_t total_bytes = total_elements * sizeof(float);
@@ -95,8 +96,7 @@ public:
             input_shape.size()
         );
 
-        LOG_INFO(logger, "Queueing Inference on {} with batch size {}", _runner_name, batch_size);
-        logger->flush();
+        LOG_INFO(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
         try {
             auto output_tensor = _session.Run(
                 Ort::RunOptions{nullptr},
@@ -122,6 +122,7 @@ public:
     std::vector<const char*> _input_names = {"input"};
     std::vector<const char*> _output_names = {"output"};
     Ort::Value _input_tensor;
+    std::shared_ptr<spdlog::logger> _logger;
 };
 
 class NodeRunner {
@@ -145,6 +146,19 @@ public:
     NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::shared_ptr<RequestProcessor>> &request_processors): 
             running_node(*node), gpu_id(gpu_id), request_processors(request_processors) 
     {
+        // get logger for node runner and cuda callback
+        _logger = Logger::getInstance().getLogger("NodeRunner");
+        if (!_logger) {
+            std::cerr << "Failed to get logger for NodeRunner(). Exiting.\n";
+            exit(EXIT_FAILURE);
+        }
+        
+        _callback_logger = Logger::getInstance().getLogger("CudaCallback");
+        if (!_callback_logger) {
+            std::cerr << "Failed to get cuda callback logger for NodeRunner(). Exiting.\n";
+            exit(EXIT_FAILURE);
+        }     
+
         // initialize ORTRunners for each session in node schedule
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: running_node.session_list) {
@@ -209,6 +223,7 @@ public:
             if(existingInd != -1) {
                 update_ort_list.push_back(ort_list[existingInd]);
             } else {
+                LOG_INFO(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
                 Ort::SessionOptions gpu_session_options;
                 OrtCUDAProviderOptions cuda_options;
                 cuda_options.device_id = gpu_id;
@@ -242,18 +257,20 @@ public:
                     std::cerr << "Unknown exception occurred while constructing ORTRunner." << std::endl;
                     std::terminate();
                 }
-                std::cout << "Finished ORTRunner for model: " << session_ptr->model_name << std::endl;
                 update_ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
             }
         }
         
-        update_node = update_node;
+        update_node = updated_node;
         pendingUpdate = true;
         _update.unlock();
     }
 
     void start() {
-        if(!_running) _runner_thread = std::thread(&NodeRunner::run, this);
+        if(!_running) {
+            LOG_INFO(_logger, "Starting Node for gpu: {}", gpu_id);
+            _runner_thread = std::thread(&NodeRunner::run, this);   
+        }
     }
 
     void stop() {
@@ -277,15 +294,20 @@ private:
     Node update_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> update_ort_list;
 
+    struct CallbackData {
+        std::string _tag;
+        std::shared_ptr<spdlog::logger> _logger;
+        CallbackData(std::string tag, std::shared_ptr<spdlog::logger> logger): _tag(tag), _logger(logger) {}
+    };
+
     static void CUDART_CB log_callback(void* user_data) {
-        auto tag = static_cast<std::string*>(user_data);
+        auto* data = static_cast<CallbackData*>(user_data);
     
         auto now = std::chrono::high_resolution_clock::now();
         auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     
-        std::cout << "BATCH PROCESSED: " << *tag << "@" << now_us << "\n";
-
-        delete tag;
+        data->_logger->info("BATCH PROCESSED: {} @ {}", data->_tag, now_us);
+        delete data;
     }
 
     void run() {
@@ -296,6 +318,7 @@ private:
 
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
+                LOG_INFO(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
                 std::vector<cudaStream_t> running_streams;
                 auto schedule_start = std::chrono::steady_clock::now();
                 for(int i=0;i<running_node.session_list.size();i++) {
@@ -320,11 +343,11 @@ private:
                     ort_ptr->run_inference(batch_current);
 
                     // add logging callback
-                    auto* model_name_copy = new std::string(session_ptr->model_name);
+                    auto* callBackData = new CallbackData(session_ptr->model_name, _callback_logger);
                     cudaLaunchHostFunc(
                         ort_ptr->_runner_stream,
                         log_callback,
-                        static_cast<void*>(model_name_copy) 
+                        static_cast<void*>(callBackData) 
                     );
 
                     running_streams.push_back(ort_ptr->_runner_stream);
@@ -350,9 +373,14 @@ private:
             // check if update is needded
             if(pendingUpdate) {
                 _update.lock();
+                    LOG_INFO(_logger, "Acquired lock on node to make schedule update");
                     // update node and ort list
                     running_node = update_node;
                     ort_list = update_ort_list;
+
+                    pendingUpdate = false;
+                    update_ort_list.clear();
+                    LOG_INFO(_logger, "Releasing lock after update finished, new list size is {}", ort_list.size());
                 _update.unlock();
             }
         }
@@ -364,6 +392,8 @@ private:
     Node running_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> ort_list;
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
+    std::shared_ptr<spdlog::logger> _logger;
+    std::shared_ptr<spdlog::logger> _callback_logger;
 };
 
 #endif

@@ -129,18 +129,22 @@ int main(int argc, char * argv[]) {
     std::string profilingFolder = "models/profiles/sample";
 
     // Initialize request processors
+    LOG_INFO(logger, "Initializing request processors");
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
     for(auto [model_name, _]:models) {
         request_processors[model_name] = std::make_shared<RequestProcessor>(model_name);
     }
 
     // Initialize executor
+    LOG_INFO(logger, "Initializing executor");
     auto executor = std::make_shared<Executor>(models, gpuList, request_processors, latencies, profilingFolder);
 
     // Start executor
+    LOG_INFO(logger, "Start executor");
     executor->start();
 
     // start simulator thread
+    LOG_INFO(logger, "Initialize and launch simulator");
     Simulator sim(request_processors);
     std::thread sim_thread(&Simulator::run, &sim);
     

@@ -18,15 +18,7 @@ double QUANTIZATION_INTERVAL = 0.5;
         * Exponential decay - Changes request rate by a given factor per second in the specified duration: DECAY_FACTOR
 */
 
-enum class rate_type {
-    flat,
-    ramp,
-    burst,
-    sinusoidal,
-    exponential_decay
-};
-
-void dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_processor, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>> &schedule, std::shared_ptr<InferenceRequest> request) {
+void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_processor, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>> &schedule, std::shared_ptr<InferenceRequest> request) {
     using namespace std::chrono;
     
     double steady_rate = 0;
@@ -76,6 +68,9 @@ void dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_proces
                 }
             }
             
+            // logging request rate
+            LOG_INFO(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
+
             // get total request count by adding fractional count leftover from previous block
             auto request_count = request_rate * QUANTIZATION_INTERVAL + residual_fraction;
             double request_count_floor;
@@ -83,7 +78,7 @@ void dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_proces
 
             // register requests
             request->request_count = request_count_floor;
-            req_processor->register_request(request);
+            if(request->request_count>0) req_processor->register_request(request);
 
             // put thread to sleep for remaining time
             auto end_time = steady_clock::now();
@@ -128,7 +123,7 @@ void Simulator::run() {
     std::vector<std::thread> threads;
     for(const auto& [model_name, processor]: request_processors) {
         auto request = std::make_shared<InferenceRequest>(model_name, 1);
-        threads.emplace_back(dynamic_request_rate_generator, processor, std::ref(schedules[model_name]), request);
+        threads.emplace_back(&Simulator::dynamic_request_rate_generator, this, processor, std::ref(schedules[model_name]), request);
     }
 
     // Wait for thread to finish
