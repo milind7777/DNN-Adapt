@@ -65,10 +65,12 @@ public:
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
+        std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
         CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
+        std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
         assert(gpu_ptr != nullptr);
@@ -85,6 +87,7 @@ public:
                                 cudaMemcpyHostToDevice,
                                 _runner_stream
         ));
+        std::cout << "MEM CPY DONE\n";
 
         Ort::MemoryInfo gpu_memory_info = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, _gpu_id, OrtMemTypeDefault);
         std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), CHANNELS, HEIGHT, WIDTH};
