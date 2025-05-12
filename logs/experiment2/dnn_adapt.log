@@ -1,6 +1,0 @@
-[2025-05-07 12:06:02.882] [root] [info] Logging system initialized. Log directory: /home/cching1/DNNAdapt/DNN-Adapt/logs
-[2025-05-07 12:06:02.882] [main] [info] DNN-Adapt starting with run_name: experiment2, model_repo: models
-[2025-05-07 12:06:02.883] [main] [info] Mapped bin file: 0x703be0a00000, size: 301056000
-[2025-05-07 12:06:02.884] [main] [info] Running generation
-[2025-05-07 12:06:02.884] [main] [info] NODE NUMBER: 1
-[2025-05-07 12:06:02.884] [main] [info] NODE NUMBER: 2
