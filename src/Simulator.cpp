@@ -69,7 +69,7 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
             }
             
             // logging request rate
-            LOG_INFO(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
+            LOG_TRACE(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
 
             // get total request count by adding fractional count leftover from previous block
             auto request_count = request_rate * QUANTIZATION_INTERVAL + residual_fraction;

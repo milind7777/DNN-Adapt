@@ -27,6 +27,14 @@ void signal_handler(int signal_num) {
 bool Logger::initialize(const std::string& log_dir, const std::string& run_name,
                        Level console_level, Level file_level) {
     std::lock_guard<std::mutex> lock(init_mutex_);
+
+    // Assign console_level to TRACE for testing
+    console_level = Level::TRACE;
+    file_level = Level::TRACE;
+
+
+    //spdlog::set_level(static_cast<spdlog::level::level_enum>(toSpdlogLevel(Level::TRACE)));
+
     
     if (initialized_) {
         return true; 
@@ -67,7 +75,7 @@ bool Logger::initialize(const std::string& log_dir, const std::string& run_name,
         initialized_ = true;
         
         auto root_logger = getLogger("root");
-        LOG_INFO(root_logger, "Logging system initialized. Log directory: {}", abs_log_dir.string());
+        LOG_DEBUG(root_logger, "Logging system initialized. Log directory: {}", abs_log_dir.string());
         root_logger->flush();
         
         return true;
@@ -159,6 +167,7 @@ std::shared_ptr<spdlog::logger> Logger::getLogger(const std::string& component_n
         auto logger = std::make_shared<spdlog::logger>(component_name, default_sinks_.begin(), default_sinks_.end());
         spdlog::register_logger(logger);
         
+        logger->set_level(static_cast<spdlog::level::level_enum>(toSpdlogLevel(Level::TRACE)));
         loggers_[component_name] = logger;
         
         return logger;
@@ -184,7 +193,7 @@ int Logger::toSpdlogLevel(Level level) {
         case Level::CRITICAL:
             return spdlog::level::critical;
         default:
-            return spdlog::level::info;
+            return spdlog::level::trace;
     }
 }
 

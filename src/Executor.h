@@ -23,14 +23,14 @@ public:
         }
         
         // initialize NodeRunners according to the gpuList
-        LOG_INFO(_logger, "Initialize NodeRunners");
+        LOG_DEBUG(_logger, "Initialize NodeRunners");
         for(int i=0;i<_gpuList.size();i++) {
             auto emptyNode = std::make_shared<Node>();
             _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _requestProcessorList));
         }
 
         // initialize scheduler: currently using nexus
-        LOG_INFO(_logger, "Initialize Scheduler");
+        LOG_DEBUG(_logger, "Initialize Scheduler");
         std::vector<std::string> modelNames;
         for(auto [name, _]: modelsList) modelNames.push_back(name);
         _scheduler = std::make_shared<NexusScheduler>(_gpuList, modelNames, _profilingFolder);
@@ -39,12 +39,12 @@ public:
     void start() {
         // start the loop for continuously checking the request rates and updating the schedule
         if(!_running) {
-            LOG_INFO(_logger, "Launching Nodes");
+            LOG_DEBUG(_logger, "Launching Nodes");
             for(auto runner:_nodeRunnersList) {
                 runner->start();
             }
 
-            LOG_INFO(_logger, "Launching executor run");
+            LOG_DEBUG(_logger, "Launching executor run");
             _runner_thread = std::thread(&Executor::run, this);
         }
     };
@@ -78,7 +78,7 @@ private:
         for(auto [model_name, processor]:_requestProcessorList) {
             auto request_rate = processor->get_request_rate();
             sessionList.push_back(std::make_shared<Session>(model_name, _latencies[model_name], request_rate));
-            LOG_INFO(_logger, "got {} requests per second for {}", request_rate, model_name);
+            LOG_DEBUG(_logger, "got {} requests per second for {}", request_rate, model_name);
         }
 
         return sessionList;
@@ -91,7 +91,7 @@ private:
             if(!_running) break;
             
             // get session list by querying request processors
-            LOG_INFO(_logger, "Querying request processors");
+            LOG_DEBUG(_logger, "Querying request processors");
             auto sessionList = generate_sessions();
 
             // generate new shcedule
