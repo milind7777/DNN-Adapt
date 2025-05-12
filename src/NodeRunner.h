@@ -56,34 +56,39 @@ public:
         cudaStreamDestroy(_runner_stream);
     }
 
-    void run_inference(int batch_size) {        
+    void run_inference(int batch_size) {   
+        std::cout << "IN run_inference\n";     
         if(batch_size == 0) return; 
         size_t total_elements = batch_size * CHANNELS * HEIGHT * WIDTH;
         size_t total_bytes = total_elements * sizeof(float);
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
+        std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
         CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
+        std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
         assert(gpu_ptr != nullptr);
         cudaPointerAttributes attr;
         cudaPointerGetAttributes(&attr, gpu_ptr);
-        assert(attr.type == cudaMemoryTypeDevice);
-        
-        assert(gMappedImageBin.data_ptr != nullptr);
 
+        std::cout << "Asserts\n";
+        assert(attr.type == cudaMemoryTypeDevice);
+        assert(gMappedImageBin.data_ptr != nullptr);
         assert(total_bytes > 0 && total_bytes < 1ULL << 32);
-        
+        std::cout << "DONE\n";
+
         CUDACHECK(cudaMemcpyAsync(gpu_ptr, 
                                 gMappedImageBin.data_ptr, 
                                 total_bytes, 
                                 cudaMemcpyHostToDevice,
                                 _runner_stream
         ));
+        std::cout << "MEM CPY DONE\n";
 
         Ort::MemoryInfo gpu_memory_info = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, _gpu_id, OrtMemTypeDefault);
         std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), CHANNELS, HEIGHT, WIDTH};
@@ -336,21 +341,24 @@ private:
                     }
 
                     // get batch from request processor
-                    auto batch_current = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size);
+                    auto batch_current = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size, gpu_id);
 
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
-                    ort_ptr->run_inference(batch_current);
+                    if(batch_current>0) {
+                        ort_ptr->run_inference(batch_current);
 
-                    // add logging callback
-                    auto* callBackData = new CallbackData(session_ptr->model_name, _callback_logger);
-                    cudaLaunchHostFunc(
-                        ort_ptr->_runner_stream,
-                        log_callback,
-                        static_cast<void*>(callBackData) 
-                    );
+                        // add logging callback
+                        std::string id = session_ptr->model_name + "_" + std::to_string(gpu_id);
+                        auto* callBackData = new CallbackData(id, _callback_logger);
+                        cudaLaunchHostFunc(
+                            ort_ptr->_runner_stream,
+                            log_callback,
+                            static_cast<void*>(callBackData) 
+                        );
 
-                    running_streams.push_back(ort_ptr->_runner_stream);
+                        running_streams.push_back(ort_ptr->_runner_stream);
+                    }
                 } if (running_streams.size()) {
                     // wait for all running streams to complete
                     for(auto stream:running_streams) {

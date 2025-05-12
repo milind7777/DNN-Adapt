@@ -33,7 +33,7 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     queue.enqueue(request_copy);
 }
 
-int RequestProcessor::form_batch(int batch_size) {
+int RequestProcessor::form_batch(int batch_size, int gpu_id) {
     int batch_cur = 0;
     int64_t last_request_arrival_time;
     std::vector<std::pair<int, int64_t>> batch_timing_info;
@@ -75,9 +75,9 @@ int RequestProcessor::form_batch(int batch_size) {
     _lock_batch.unlock();
 
     // log the batch timing info
-    LOG_INFO(_logger, "BATCH FORMED: {}", model_name);
+    LOG_INFO(_logger, "BATCH FORMED: id:{}_{} size: {}", model_name, gpu_id, batch_cur);
     for(auto entry:batch_timing_info) {
-        LOG_INFO(_logger, "request_count: {}, arrival_time: {}", entry.first, entry.second);
+        LOG_INFO(_logger, "{}_{}: request_count: {}, arrival_time: {}", model_name, gpu_id, entry.first, entry.second);
     }
     
     return batch_cur;

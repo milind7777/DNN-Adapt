@@ -46,7 +46,7 @@ public:
         }
     };
     void register_request(std::shared_ptr<InferenceRequest> req);
-    int form_batch(int batch_size);
+    int form_batch(int batch_size, int gpu_id);
     size_t get_size() const;
     double get_request_rate();
 };

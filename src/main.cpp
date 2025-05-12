@@ -17,8 +17,9 @@
 #include "nexus.h"
 #include "NodeRunner.h"
 #include "imageInput.h"
-#include  "Logger.h"
+#include "Logger.h"
 #include "Executor.h"
+#include "Profiler.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -32,19 +33,56 @@ bool endsWith(const std::string &str, const std::string &pattern) {
     return str.rfind(pattern) == str.length() - pattern.length();
 }
 
+void run_profiling() {
+    // run profiling on all models for given batch size range
+    // go through models folder and find onnx files to run profiling on
+    // batch size can range from 1 to 1024 for all models
+    // Initilaize profiler with onnx file path and max batch size to test till
+    
+    // Initialize the logger
+    if (!Logger::getInstance().initialize("logs", "profiling", Logger::Level::INFO, Logger::Level::TRACE)) {
+        std::cerr << "Failed to initialize logging system. Exiting.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    // Initialize mmap
+    auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");
+
+    const std::string models_folder = "models";
+    const int max_batch_size = 1024;
+    for(const auto& entry:std::filesystem::directory_iterator(models_folder)) {
+        if(entry.is_regular_file() && entry.path().extension() == ".onnx") {
+            std::string model_path = entry.path().string();
+            std::string model_name = entry.path().stem().string();
+
+            // Initialize and run profiler on this model name and path
+            auto profiler = new Profiler(model_name, model_path);
+            profiler->profile(1024, 0);
+            std::cout << "Done with profile\n";
+            // REMOVE LATER
+            break;
+        }
+    }
+
+    // free mmap and logger
+    Logger::getInstance().shutdown();
+    munmap(mappedBin.data_ptr, mappedBin.file_size);
+}
+
 int main(int argc, char * argv[]) {
     // argument processing
     int option_index = 0;
     static struct option long_options[] = {
         {"model_repo", required_argument, nullptr, 'm'},
         {"run_name", required_argument, nullptr, 'r'},
+        {"profile", no_argument, nullptr, 'p'},
         {0, 0, 0, 0}
     };
     
     int opt;
     std::string model_dir = "";
     std::string run_name = "";
-    while((opt = getopt_long_only(argc, argv, "m:r:", long_options, &option_index)) != -1) {
+    while((opt = getopt_long_only(argc, argv, "m:r:p:", long_options, &option_index)) != -1) {
         switch(opt) {
             case 'm':
                 model_dir = optarg;
@@ -52,6 +90,9 @@ int main(int argc, char * argv[]) {
             case 'r':
                 run_name = optarg;
                 break;
+            case 'p':
+                run_profiling();
+                return 0;
             default:
                 std::cerr << "Usage: " << argv[0] << " --model_repo <dir> --run_name <name>\n";
                 exit(1);

@@ -107,16 +107,16 @@ void Simulator::run() {
     //     {rate_type::ramp, {5, {-10}}}
     // };
 
-    // schedules["resnet18"] = {
-    //     {rate_type::ramp, {5, {2}}},
-    //     {rate_type::burst, {10, {10, 1}}},
-    //     {rate_type::exponential_decay, {15, {0.5}}}
-    // };
+    schedules["resnet18"] = {
+        {rate_type::ramp, {5, {2}}},
+        {rate_type::flat, {30, {10}}},
+        {rate_type::exponential_decay, {20, {0.8}}}
+    };
 
     schedules["vit16"] = {
         {rate_type::ramp, {5, {2}}},
-        {rate_type::sinusoidal, {20, {10, 5}}},
-        {rate_type::exponential_decay, {5, {0.8}}}
+        {rate_type::flat, {30, {10}}},
+        {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     // Launch threads for each model

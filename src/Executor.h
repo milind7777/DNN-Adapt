@@ -98,7 +98,18 @@ private:
             auto nodeList = _scheduler->generate_schedule(sessionList);
 
             // check to make sure we are not using more than allowed GPUs
-            assert(nodeList.size() <= _gpuList.size());
+            if (nodeList.size() > _gpuList.size()) {
+                std::cerr << "Assertion failed: nodeList.size() (" << nodeList.size()
+                          << ") > _gpuList.size() (" << _gpuList.size() << ")" << std::endl;
+                assert(false);
+            }          
+
+            // hack to test parallel execution on gpu streams
+            if(nodeList.size() > 0) {
+                for(int i=0;i<nodeList[0]->session_list.size();i++) {
+                    nodeList[0]->session_list[i].second.second = 1;
+                }
+            }
 
             // update NodeRunners with new schedule
             for(int i=0;i<nodeList.size();i++) {
