@@ -100,7 +100,7 @@ public:
             input_shape.size()
         );
 
-        LOG_INFO(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
+        LOG_DEBUG(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
         try {
             auto output_tensor = _session.Run(
                 Ort::RunOptions{nullptr},
