@@ -108,8 +108,8 @@ void Simulator::run() {
     // };
 
     schedules["resnet18"] = {
-        {rate_type::ramp, {5, {2}}},
-        {rate_type::flat, {30, {10}}},
+        {rate_type::ramp, {10, {2}}},
+        {rate_type::flat, {40, {10}}},
         {rate_type::exponential_decay, {20, {0.8}}}
     };
 
