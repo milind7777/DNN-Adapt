@@ -7,6 +7,7 @@ import datetime
 from collections import defaultdict, deque
 import logging
 import shutil
+import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -17,12 +18,22 @@ CSV_OUTPUT_DIR = '/home/cching1/DNNAdapt/DNN-Adapt/util/csv_data_cache' # Ensure
 MAX_HISTORY_CSV_ROWS = 5000 # For history CSVs to prevent them from growing indefinitely
 RECENT_REQUESTS_LIMIT = 200 # For recent_requests_details.csv
 
-#SLO Configuration (in microseconds)
-MODEL_SLOS_US = {
-    "resnet18": 400,  # 
-    "vit16": 500,     # 
-}
-DEFAULT_SLO_US = 10000 * 1000 # 
+# SLO Configuration (in microseconds)
+try:
+    with open('/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json', 'r') as f:
+        slo_config = json.load(f)
+    MODEL_SLOS_US = slo_config.get('model_slos_us', {})
+    DEFAULT_SLO_US = slo_config.get('default_slo_us', 10000)
+    logger.info(f"Loaded SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
+except Exception as e:
+    logger.warning(f"Failed to load SLO configuration: {e}")
+    # Fallback to hardcoded values
+    MODEL_SLOS_US = {
+        "resnet18": 5000,
+        "vit16": 7000,
+    }
+    DEFAULT_SLO_US = 10000
+    logger.info(f"Using fallback SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
 
 # CSV Filenames
 OVERALL_METRICS_CSV = os.path.join(CSV_OUTPUT_DIR, "overall_metrics_live.csv")
@@ -374,7 +385,14 @@ class LogToCsvProcessor:
 
                         # SLO Check
                         model_slo_us = MODEL_SLOS_US.get(req_data['model_name'], DEFAULT_SLO_US)
+                        processing_time_us = processing_time_ns / 1000.0
                         slo_status = "Met" if processing_time_us <= model_slo_us else "Violated"
+                        
+                        # Log SLO check details at trace level
+                        logger.debug(f"SLO check for {req_data['model_name']}: " 
+                                    f"Processing time: {processing_time_us:.2f} μs, "
+                                    f"SLO threshold: {model_slo_us} μs, "
+                                    f"Status: {slo_status}")
 
                         if slo_status == "Met":
                             self.metrics['slo_met_count'] += 1

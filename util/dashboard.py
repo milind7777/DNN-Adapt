@@ -216,30 +216,96 @@ class CSVDashboard:
 
         @self.app.callback(Output("slo-violation-bar", "figure"), Input("interval-component", "n_intervals"))
         def update_slo_violation_bar(n):
-            df = read_csv_safely(MODEL_METRICS_CSV, default_df_cols=['model_name', 'slo_violated_count'])
+            # For a line graph showing violations over time, we need to use the performance history data
+            df = read_csv_safely(PERFORMANCE_HISTORY_CSV, default_df_cols=['timestamp', 'slo_met_count_cumulative', 'slo_violated_count_cumulative'])
             
-            required_cols = ['model_name', 'slo_violated_count']
+            required_cols = ['timestamp', 'slo_met_count_cumulative', 'slo_violated_count_cumulative']
             missing_cols = [col for col in required_cols if col not in df.columns]
 
             if missing_cols:
-                logger.warning(f"In 'update_slo_violation_bar': MODEL_METRICS_CSV is missing columns: {missing_cols}. Check CSV generation or clear old CSVs.")
-                return go.Figure().update_layout(title=f"SLO Violations by Model (Error: Missing columns {missing_cols} in CSV)")
+                logger.warning(f"In 'update_slo_violation_bar': PERFORMANCE_HISTORY_CSV is missing columns: {missing_cols}. Check CSV generation or clear old CSVs.")
+                return go.Figure().update_layout(title=f"SLO Compliance Over Time (Error: Missing columns {missing_cols} in CSV)")
 
             if df.empty: 
-                return go.Figure().update_layout(title="SLO Violations by Model (No data)")
+                return go.Figure().update_layout(title="SLO Compliance Over Time (No data)")
 
-            df['slo_violated_count'] = pd.to_numeric(df['slo_violated_count'], errors='coerce').fillna(0)
+            # Convert timestamp to datetime for proper plotting
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
             
-            df_plottable = df.dropna(subset=['model_name']) # model_name is essential
+            # Convert to numeric, with NaN handling
+            df['slo_met_count_cumulative'] = pd.to_numeric(df['slo_met_count_cumulative'], errors='coerce').fillna(0)
+            df['slo_violated_count_cumulative'] = pd.to_numeric(df['slo_violated_count_cumulative'], errors='coerce').fillna(0)
+            
+            # Sort by timestamp to ensure proper line plotting
+            df_plottable = df.dropna(subset=['timestamp']).sort_values('timestamp')
 
             if df_plottable.empty:
-                return go.Figure().update_layout(title="SLO Violations by Model (Insufficient valid data)")
+                return go.Figure().update_layout(title="SLO Compliance Over Time (Insufficient valid data)")
 
-            df_sorted = df_plottable.sort_values('slo_violated_count', ascending=False)
-            fig = px.bar(df_sorted, x='model_name', y='slo_violated_count', text='slo_violated_count',
-                         color='model_name', labels={'slo_violated_count': 'SLO Violations Count'})
-            fig.update_traces(texttemplate='%{text}', textposition='outside') # Show count as text
-            fig.update_layout(title="SLO Violations by Model", yaxis_title="Violation Count", xaxis_title="Model", showlegend=False, margin=dict(l=50,r=50,t=50,b=50), transition_duration=300) # Removed height here, set in layout
+            # We'll also get model-specific data for the detailed view
+            model_df = read_csv_safely(MODEL_METRICS_CSV, default_df_cols=['model_name', 'slo_met_count', 'slo_violated_count'])
+            if not model_df.empty:
+                model_df['slo_met_count'] = pd.to_numeric(model_df['slo_met_count'], errors='coerce').fillna(0)
+                model_df['slo_violated_count'] = pd.to_numeric(model_df['slo_violated_count'], errors='coerce').fillna(0)
+                model_df['total_count'] = model_df['slo_met_count'] + model_df['slo_violated_count']
+                # Calculate violation percentage if there are any requests
+                model_df['violation_pct'] = 0.0
+                mask = model_df['total_count'] > 0
+                if mask.any():
+                    model_df.loc[mask, 'violation_pct'] = model_df.loc[mask, 'slo_violated_count'] / model_df.loc[mask, 'total_count'] * 100
+            
+            # Create figure with primary y-axis for cumulative counts
+            fig = go.Figure()
+            
+            # Add traces for SLO met and violated counts
+            fig.add_trace(go.Scatter(
+                x=df_plottable['timestamp'], 
+                y=df_plottable['slo_met_count_cumulative'], 
+                mode='lines+markers', 
+                name='SLO Met', 
+                line=dict(color='#28a745', width=2),
+                marker=dict(size=6)
+            ))
+            
+            fig.add_trace(go.Scatter(
+                x=df_plottable['timestamp'], 
+                y=df_plottable['slo_violated_count_cumulative'], 
+                mode='lines+markers', 
+                name='SLO Violated', 
+                line=dict(color='#dc3545', width=2),
+                marker=dict(size=6)
+            ))
+            
+            # If we have model-specific data, add an annotation showing current state
+            if not model_df.empty:
+                annotation_text = "<br>".join([
+                    f"{row['model_name']}: {row['violation_pct']:.1f}% violations ({int(row['slo_violated_count'])}/{int(row['total_count'])})"
+                    for _, row in model_df.iterrows() if row['total_count'] > 0
+                ])
+                
+                if annotation_text:
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.99,
+                        text=f"<b>Current SLO Status:</b><br>{annotation_text}",
+                        showarrow=False,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="darkgrey",
+                        borderwidth=1,
+                        borderpad=4,
+                        align="left"
+                    )
+            
+            fig.update_layout(
+                title="SLO Compliance Over Time",
+                xaxis_title="Time",
+                yaxis_title="Cumulative Count",
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1),
+                margin=dict(l=50,r=50,t=50,b=50),
+                transition_duration=300
+            )
+            
             return fig
 
         @self.app.callback(Output("request-timeline", "figure"), Input("interval-component", "n_intervals"))
