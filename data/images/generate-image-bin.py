@@ -8,7 +8,7 @@ from pathlib import Path
 output_bin_file = "batch_input_nchw.bin"
 dataset_name = "CIFAR100"
 target_size = (224, 224)
-num_images = 500
+num_images = 1024
 
 # --- TRANSFORM PIPELINE ---
 transform = T.Compose([
