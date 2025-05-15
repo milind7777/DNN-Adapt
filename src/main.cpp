@@ -165,13 +165,13 @@ int main(int argc, char * argv[]) {
     gpuList.push_back(gpu2);
 
     // path to profiling folder
-    std::string profilingFolder = "models/profiles/sample";
+    std::string profilingFolder = "models/profiles/system";
 
     // Initialize request processors
     LOG_DEBUG(logger, "Initializing request processors");
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
     for(auto [model_name, _]:models) {
-        request_processors[model_name] = std::make_shared<RequestProcessor>(model_name);
+        request_processors[model_name] = std::make_shared<RequestProcessor>(model_name, latencies[model_name]);
     }
 
     // Initialize executor

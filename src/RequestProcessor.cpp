@@ -41,16 +41,29 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
     // acquire lock to prevent parallel batch forming
     _lock_batch.lock();
 
+    // get current time
+    auto now = std::chrono::high_resolution_clock::now();
+    auto time_now = std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()
+    ).count();
+
     // try to form batch from buffer first
     if(buffer != nullptr) {
-        if(buffer->request_count > batch_size) {
-            buffer->request_count -= batch_size;
-            batch_cur = batch_size;
-            batch_timing_info.push_back({batch_size, buffer->arrival_time});
-        } else {
-            batch_cur = buffer->request_count;
-            batch_timing_info.push_back({buffer->request_count, buffer->arrival_time});
+        // discard buffer is stale
+        auto request_wait_time = static_cast<double>(time_now - buffer->arrival_time) / 1000.0;
+        if(request_wait_time >= latency_slo) {
+            LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             buffer = nullptr;
+        } else {
+            if(buffer->request_count > batch_size) {
+                buffer->request_count -= batch_size;
+                batch_cur = batch_size;
+                batch_timing_info.push_back({batch_size, buffer->arrival_time});
+            } else {
+                batch_cur = buffer->request_count;
+                batch_timing_info.push_back({buffer->request_count, buffer->arrival_time});
+                buffer = nullptr;
+            }
         }
     }
 
@@ -58,9 +71,15 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
     while(batch_cur < batch_size) {
         std::shared_ptr<InferenceRequest> request;
         if(queue.try_dequeue(request)) {
-            last_request_arrival_time = request->arrival_time;
-            batch_timing_info.push_back({std::min(request->request_count, batch_size - batch_cur), request->arrival_time});
-            batch_cur += request->request_count;
+            // discard stale requests
+            auto request_wait_time = static_cast<double>(time_now - request->arrival_time) / 1000.0;
+            if(request_wait_time >= latency_slo) {
+                LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, request->request_count, time_now);
+            } else {
+                last_request_arrival_time = request->arrival_time;
+                batch_timing_info.push_back({std::min(request->request_count, batch_size - batch_cur), request->arrival_time});
+                batch_cur += request->request_count;
+            }
         } else {
             break;
         }

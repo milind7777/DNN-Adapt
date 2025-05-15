@@ -6,7 +6,6 @@
 #include "NodeRunner.h"
 #include "Logger.h"
 #include <fstream>
-#include <nlohmann/json.hpp> 
 
 class Executor {
 public:
@@ -25,7 +24,7 @@ public:
         }
         
         // Load SLO configuration
-        load_slo_config("/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json");
+        // load_slo_config("/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json");
         
         // initialize NodeRunners according to the gpuList
         LOG_DEBUG(_logger, "Initialize NodeRunners");
@@ -81,32 +80,32 @@ private:
     std::map<std::string, double> _model_slos_us; // SLO thresholds in microseconds
     double _default_slo_us = 10000.0; // Default SLO threshold
     
-    void load_slo_config(const std::string& config_path) {
-        try {
-            std::ifstream file(config_path);
-            if (!file.is_open()) {
-                LOG_WARNING(_logger, "Could not open SLO config file: {}. Using default SLOs.", config_path);
-                return;
-            }
+    // void load_slo_config(const std::string& config_path) {
+    //     try {
+    //         std::ifstream file(config_path);
+    //         if (!file.is_open()) {
+    //             LOG_WARN(_logger, "Could not open SLO config file: {}. Using default SLOs.", config_path);
+    //             return;
+    //         }
             
-            nlohmann::json config;
-            file >> config;
+    //         nlohmann::json config;
+    //         file >> config;
             
-            if (config.contains("model_slos_us")) {
-                for (auto& [model, slo] : config["model_slos_us"].items()) {
-                    _model_slos_us[model] = slo.get<double>();
-                    LOG_INFO(_logger, "Loaded SLO for {}: {} μs", model, slo.get<double>());
-                }
-            }
+    //         if (config.contains("model_slos_us")) {
+    //             for (auto& [model, slo] : config["model_slos_us"].items()) {
+    //                 _model_slos_us[model] = slo.get<double>();
+    //                 LOG_INFO(_logger, "Loaded SLO for {}: {} μs", model, slo.get<double>());
+    //             }
+    //         }
             
-            if (config.contains("default_slo_us")) {
-                _default_slo_us = config["default_slo_us"].get<double>();
-                LOG_INFO(_logger, "Loaded default SLO: {} μs", _default_slo_us);
-            }
-        } catch (std::exception& e) {
-            LOG_ERROR(_logger, "Error loading SLO config: {}", e.what());
-        }
-    }
+    //         if (config.contains("default_slo_us")) {
+    //             _default_slo_us = config["default_slo_us"].get<double>();
+    //             LOG_INFO(_logger, "Loaded default SLO: {} μs", _default_slo_us);
+    //         }
+    //     } catch (std::exception& e) {
+    //         LOG_ERROR(_logger, "Error loading SLO config: {}", e.what());
+    //     }
+    // }
     
     std::vector<std::shared_ptr<Session>> generate_sessions() {
         std::vector<std::shared_ptr<Session>> sessionList;
