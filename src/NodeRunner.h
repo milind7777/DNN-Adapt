@@ -57,30 +57,25 @@ public:
     }
 
     void run_inference(int batch_size) {   
-        std::cout << "IN run_inference\n";     
         if(batch_size == 0) return; 
         size_t total_elements = batch_size * CHANNELS * HEIGHT * WIDTH;
         size_t total_bytes = total_elements * sizeof(float);
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
-        std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
         CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
-        std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
         assert(gpu_ptr != nullptr);
         cudaPointerAttributes attr;
         cudaPointerGetAttributes(&attr, gpu_ptr);
 
-        std::cout << "Asserts\n";
         assert(attr.type == cudaMemoryTypeDevice);
         assert(gMappedImageBin.data_ptr != nullptr);
         assert(total_bytes > 0 && total_bytes < 1ULL << 32);
-        std::cout << "DONE\n";
 
         CUDACHECK(cudaMemcpyAsync(gpu_ptr, 
                                 gMappedImageBin.data_ptr, 
@@ -88,7 +83,6 @@ public:
                                 cudaMemcpyHostToDevice,
                                 _runner_stream
         ));
-        std::cout << "MEM CPY DONE\n";
 
         Ort::MemoryInfo gpu_memory_info = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, _gpu_id, OrtMemTypeDefault);
         std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), CHANNELS, HEIGHT, WIDTH};
