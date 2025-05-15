@@ -58,9 +58,6 @@ void run_profiling() {
             // Initialize and run profiler on this model name and path
             auto profiler = new Profiler(model_name, model_path);
             profiler->profile(1024, 0);
-            std::cout << "Done with profile\n";
-            // REMOVE LATER
-            break;
         }
     }
 
