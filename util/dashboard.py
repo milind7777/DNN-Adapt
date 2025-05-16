@@ -71,7 +71,8 @@ class CSVDashboard:
                 dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Throughput & Performance", className="m-0")), dbc.CardBody(dcc.Graph(id="throughput-graph"))]), width=6) # throughput-graph already has height=350px set in its callback
             ], className="mb-4"),
             dbc.Row([
-                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("SLO Violations by Model", className="m-0")), dbc.CardBody(dcc.Graph(id="slo-violation-bar", style={"height": "350px"}))]), width=6),
+                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("SLO Violations - Cummulative", className="m-0")), dbc.CardBody(dcc.Graph(id="slo-violation-bar", style={"height": "350px"}))]), width=6),
+                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("SLO Violations", className="m-0")), dbc.CardBody(dcc.Graph(id="slo-violation-buckets", style={"height": "350px"}))]), width=6),
                 dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Request Processing Timeline (Recent)", className="m-0")), dbc.CardBody(dcc.Graph(id="request-timeline", style={"height": "350px"}))]), width=6)
             ], className="mb-4"),
             dbc.Row([
@@ -308,6 +309,140 @@ class CSVDashboard:
             
             return fig
 
+        @self.app.callback(Output("slo-violation-buckets", "figure"), Input("interval-component", "n_intervals"))
+        def update_slo_violation_buckets(n):
+            # Get the recent requests details for per-second analysis
+            df = read_csv_safely(RECENT_REQUESTS_DETAILS_CSV, default_df_cols=[
+                'arrival_time_readable', 'model_name', 'slo_status', 'processing_time_us'
+            ])
+            
+            if df.empty:
+                return go.Figure().update_layout(title="SLO Violations Per Second (No data)")
+                
+            # Convert arrival timestamps to datetime for bucketing
+            df['arrival_time_readable'] = pd.to_datetime(df['arrival_time_readable'], errors='coerce')
+            
+            # Drop rows with invalid timestamps
+            df = df.dropna(subset=['arrival_time_readable'])
+            if df.empty:
+                return go.Figure().update_layout(title="SLO Violations Per Second (No valid timestamps)")
+            
+            # Round down to nearest second for bucketing
+            df['time_bucket'] = df['arrival_time_readable'].dt.floor('1s')
+            
+            # Count violations and total requests per bucket and model
+            buckets = []
+            for (time_bucket, model), group in df.groupby(['time_bucket', 'model_name']):
+                total_requests = len(group)
+                violations = sum(group['slo_status'] == 'Violated')
+                met = total_requests - violations
+                buckets.append({
+                    'time_bucket': time_bucket,
+                    'model_name': model,
+                    'total_requests': total_requests,
+                    'violations': violations,
+                    'met': met,
+                    'violation_rate': (violations / total_requests * 100) if total_requests > 0 else 0
+                })
+                
+            if not buckets:
+                return go.Figure().update_layout(title="SLO Violations Per Second (No data)")
+                
+            bucket_df = pd.DataFrame(buckets)
+            
+            # Sort by time for consistent display
+            bucket_df = bucket_df.sort_values('time_bucket')
+            
+            # Get the most recent 30-60 seconds for better visibility
+            # This ensures we show a continuous window of previous seconds' data
+            if len(bucket_df) > 2:
+                current_time = bucket_df['time_bucket'].max()
+                # Show 60 seconds of data, but all if less is available
+                lookback_seconds = 60
+                min_time = current_time - pd.Timedelta(seconds=lookback_seconds)
+                bucket_df = bucket_df[bucket_df['time_bucket'] >= min_time]
+    
+            # Create figure with lines for violations and violation rate
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Add lines for violations by model
+            models = bucket_df['model_name'].unique()
+            colors = px.colors.qualitative.Plotly[:len(models)]
+            
+            for i, model in enumerate(models):
+                model_data = bucket_df[bucket_df['model_name'] == model].copy()
+                
+                # Ensure data is sorted by time for continuous lines
+                model_data = model_data.sort_values('time_bucket')
+                
+                if not model_data.empty:
+                    # Fill in missing time buckets with zeros to ensure continuous lines
+                    # Create a complete time range from min to max with 1 second intervals
+                    full_time_range = pd.date_range(
+                        start=model_data['time_bucket'].min(),
+                        end=model_data['time_bucket'].max(),
+                        freq='1s'
+                    )
+                    
+                    # Create a complete dataframe with all time buckets
+                    complete_df = pd.DataFrame({'time_bucket': full_time_range})
+                    # Merge with actual data
+                    complete_df = complete_df.merge(model_data, on='time_bucket', how='left')
+                    # Fill missing values with zeros
+                    complete_df['violations'] = complete_df['violations'].fillna(0)
+                    complete_df['met'] = complete_df['met'].fillna(0)
+                    complete_df['violation_rate'] = complete_df['violation_rate'].fillna(0)
+                    complete_df['model_name'] = model
+                    
+                    # Non-cumulative violations count per second with continuous lines
+                    fig.add_trace(go.Scatter(
+                        x=complete_df['time_bucket'],
+                        y=complete_df['violations'],
+                        name=f"{model} Violations",
+                        mode='lines+markers',
+                        line=dict(color=colors[i], width=3, shape='linear'),  # Using shape='linear' for straight lines
+                        marker=dict(size=8),
+                        connectgaps=True  # Connect gaps to ensure continuous line
+                    ), secondary_y=False)
+                    
+                    # Add SLO Met count on the same primary y-axis
+                    fig.add_trace(go.Scatter(
+                        x=complete_df['time_bucket'],
+                        y=complete_df['met'],
+                        name=f"{model} Met",
+                        mode='lines+markers',
+                        line=dict(color=colors[i], width=3, dash='dash', shape='linear'),
+                        marker=dict(size=6),
+                        connectgaps=True
+                    ), secondary_y=False)
+                    
+                    # Violation rate on secondary y-axis (percentage)
+                    fig.add_trace(go.Scatter(
+                        x=complete_df['time_bucket'],
+                        y=complete_df['violation_rate'],
+                        mode='lines+markers',
+                        name=f"{model} Rate %",
+                        line=dict(color=colors[i], dash='dot', width=2, shape='linear'),
+                        marker=dict(symbol='x', size=6),
+                        connectgaps=True
+                    ), secondary_y=True)
+    
+            # Update layout
+            fig.update_layout(
+                title="SLO Violations Per Second (Non-Cumulative)",
+                xaxis_title="Time",
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1),
+                margin=dict(l=50, r=50, t=50, b=50),
+                transition_duration=300
+            )
+            
+            # Change primary y-axis title from "Requests Per Second" to "Violation Counts"
+            fig.update_yaxes(title_text="Violation Counts", secondary_y=False)
+            fig.update_yaxes(title_text="Violation Rate %", secondary_y=True, range=[0, 100])
+            
+            return fig
+
         @self.app.callback(Output("request-timeline", "figure"), Input("interval-component", "n_intervals"))
         def update_request_timeline(n):
             df = read_csv_safely(RECENT_REQUESTS_DETAILS_CSV, default_df_cols=['arrival_time_readable', 'processing_time_us', 'model_name', 'status', 'gpu_id', 'batch_id', 'completion_time_readable', 'slo_status'])
@@ -330,15 +465,25 @@ class CSVDashboard:
 
 
             df_processed['arrival_time_readable'] = pd.to_datetime(df_processed['arrival_time_readable'], errors='coerce')
+            df_processed['completion_time_readable'] = pd.to_datetime(df_processed['completion_time_readable'], errors='coerce')
             
-            # Ensure model_name is also present for coloring, convert to string to be safe
-            if 'model_name' not in df_processed.columns:
-                df_processed['model_name'] = "Unknown" # Add a default if missing
-            else:
-                # Ensure model_name is string and fill NaNs if any, to prevent issues with color mapping
-                df_processed['model_name'] = df_processed['model_name'].astype(str).fillna("Unknown")
+            # Convert processing time to microseconds if it's in another unit
+            if 'processing_time_us' not in df_processed.columns:
+                if 'processing_time_ms' in df_processed.columns:
+                    logger.warning("Found 'processing_time_ms' in recent_requests_details.csv for timeline. Converting to 'processing_time_us'.")
+                    df_processed['processing_time_us'] = pd.to_numeric(df_processed['processing_time_ms'], errors='coerce') * 1000.0
+                else:
+                    logger.warning("Neither 'processing_time_us' nor 'processing_time_ms' found in recent_requests_details.csv. Processing times for timeline will be missing.")
+                    df_processed['processing_time_us'] = pd.NA # Assign pd.NA to the column
+            else: # Ensure it's numeric if it exists
+                df_processed['processing_time_us'] = pd.to_numeric(df_processed['processing_time_us'], errors='coerce')
 
 
+            # Create a color mapping based on SLO status
+            if 'slo_status' in df_processed.columns:
+                color_map = {'Met': 'green', 'Violated': 'red'}
+                df_processed['color'] = df_processed['slo_status'].map(color_map).fillna('blue')
+    
             # Filter out rows where essential data for plotting might be NA
             df_plot_ready = df_processed.dropna(subset=['arrival_time_readable', 'processing_time_us', 'model_name'])
             
@@ -368,8 +513,31 @@ class CSVDashboard:
                                  size='processing_time_us', 
                                  size_max=15, 
                                  opacity=0.7,
-                                 hover_data=hover_data_cols, # Pass the list of column names
-                                 title="Request Processing Timeline (Recent Requests)",)
+                                 hover_data=hover_data_cols,
+                                 title="Request Processing Timeline (Wall Clock Time)")
+                
+                # Add reference lines for SLO thresholds if we know them
+                try:
+                    # This could come from a config file or the MODEL_SLOS_US dict
+                    slo_thresholds = {
+                        'resnet18': 500,
+                        'vit16': 1000,
+                        'efficientnetb0': 300,
+                        # Add other models as needed
+                    }
+                    
+                    for model, threshold in slo_thresholds.items():
+                        if model in df_plot_ready['model_name'].unique():
+                            fig.add_hline(
+                                y=threshold, 
+                                line_dash="dot", 
+                                annotation_text=f"{model} SLO: {threshold} µs",
+                                annotation_position="right",
+                                line=dict(color="red", width=1)
+                            )
+                except Exception as e:
+                    logger.warning(f"Could not add SLO threshold lines: {e}")
+                
             except Exception as e:
                 logger.error(f"Error creating scatter plot for request timeline: {e}")
                 if not df_plot_ready.empty:
@@ -411,17 +579,50 @@ class CSVDashboard:
                 if col not in df.columns:
                     df[col] = None
             
-            df_display = df.head(15)[display_cols].copy() # Show top 15 from the CSV (which should be recent)
+            df_display = df.head(15)[display_cols].copy()
+            
+            # Convert to wall clock time format for better readability
+            if 'arrival_time_readable' in df_display.columns:
+                try:
+                    df_display['arrival_time_readable'] = pd.to_datetime(df_display['arrival_time_readable'], errors='coerce')
+                    df_display['arrival_time_readable'] = df_display['arrival_time_readable'].dt.strftime('%H:%M:%S.%f').str[:-3]
+                except Exception as e:
+                    logger.warning(f"Could not format arrival time: {e}")
+            
+            if 'completion_time_readable' in df_display.columns:
+                try:
+                    df_display['completion_time_readable'] = pd.to_datetime(df_display['completion_time_readable'], errors='coerce')
+                    df_display['completion_time_readable'] = df_display['completion_time_readable'].dt.strftime('%H:%M:%S.%f').str[:-3]
+                except Exception as e:
+                    logger.warning(f"Could not format completion time: {e}")
             
             df_display.columns = ['Model', 'GPU', 'Batch ID', 'Arrival', 'Completion', 'Proc. Time (µs)', 'Status', 'SLO Status']
             
             # Format processing time
             if 'Proc. Time (µs)' in df_display.columns:
                  df_display['Proc. Time (µs)'] = df_display['Proc. Time (µs)'].apply(lambda x: f"{x:.2f}" if pd.notnull(x) else "")
-
-
-            table = dbc.Table.from_dataframe(df_display, striped=True, bordered=True, hover=True, className="table-sm")
-            # Simple table for now, styling can be added as before if needed
+            
+            # Add color highlighting for SLO violations in the table
+            if 'SLO Status' in df_display.columns:
+                table = dbc.Table.from_dataframe(
+                    df_display, 
+                    striped=True, 
+                    bordered=True, 
+                    hover=True,
+                    className="table-sm",
+                    style={'font-size': '0.9rem'}  # Slightly smaller font for more compact display
+                )
+                
+                # Add color highlighting for SLO Status column
+                for i, row in enumerate(df_display.itertuples()):
+                    status_idx = df_display.columns.get_loc('SLO Status')
+                    if hasattr(row, '_' + str(status_idx+1)) and getattr(row, '_' + str(status_idx+1)) == 'Violated':
+                        table.children[1].children[i].children[status_idx].style = {'color': 'red', 'font-weight': 'bold'}
+                    elif hasattr(row, '_' + str(status_idx+1)) and getattr(row, '_' + str(status_idx+1)) == 'Met':
+                        table.children[1].children[i].children[status_idx].style = {'color': 'green'}
+            else:
+                table = dbc.Table.from_dataframe(df_display, striped=True, bordered=True, hover=True, className="table-sm")
+            
             return table
 
     def run(self, debug=False, port=8051): # Changed port to avoid conflict if old monitor runs

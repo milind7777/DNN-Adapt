@@ -23,16 +23,16 @@ try:
     with open('/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json', 'r') as f:
         slo_config = json.load(f)
     MODEL_SLOS_US = slo_config.get('model_slos_us', {})
-    DEFAULT_SLO_US = slo_config.get('default_slo_us', 10000)
+    DEFAULT_SLO_US = slo_config.get('default_slo_us', 1000)
     logger.info(f"Loaded SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
 except Exception as e:
     logger.warning(f"Failed to load SLO configuration: {e}")
     # Fallback to hardcoded values
     MODEL_SLOS_US = {
-        "resnet18": 5000,
-        "vit16": 7000,
+        "resnet18": 500,
+        "vit16": 1000,
     }
-    DEFAULT_SLO_US = 10000
+    DEFAULT_SLO_US = 1000
     logger.info(f"Using fallback SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
 
 # CSV Filenames
@@ -156,7 +156,7 @@ class LogToCsvProcessor:
             'timestamp': datetime.datetime.now().isoformat(),
             'total_requests': self.metrics['total_requests'],
             'processed_requests': self.metrics['processed_requests'],
-            'avg_processing_time_us': self.metrics['avg_processing_time_ns'] / 1000.0 if self.metrics['processed_requests'] > 0 else 0,
+            'avg_processing_time_us': self.metrics['avg_processing_time_ns'] if self.metrics['processed_requests'] > 0 else 0,
             'recent_throughput_rps': self.metrics['recent_throughput'],
             'slo_met_count': self.metrics['slo_met_count'],
             'slo_violated_count': self.metrics['slo_violated_count']
@@ -170,7 +170,7 @@ class LogToCsvProcessor:
                 'model_name': model_name,
                 'request_count': m_metrics['request_count'],
                 'processed_count': m_metrics['processed_count'],
-                'avg_processing_time_us': m_metrics['avg_processing_time_ns'] / 1000.0 if m_metrics['processed_count'] > 0 else 0,
+                'avg_processing_time_us': m_metrics['avg_processing_time_ns'] if m_metrics['processed_count'] > 0 else 0,
                 'target_rate': m_metrics['target_rate'],
                 'slo_met_count': m_metrics['slo_met_count'],
                 'slo_violated_count': m_metrics['slo_violated_count']
@@ -225,7 +225,7 @@ class LogToCsvProcessor:
             'timestamp': now_iso,
             'total_requests_cumulative': self.metrics['total_requests'],
             'processed_requests_cumulative': self.metrics['processed_requests'],
-            'avg_processing_time_us_overall': self.metrics['avg_processing_time_ns'] / 1000.0 if self.metrics['processed_requests'] > 0 else 0,
+            'avg_processing_time_us_overall': self.metrics['avg_processing_time_ns'] if self.metrics['processed_requests'] > 0 else 0,
             'throughput_rps': self.metrics['recent_throughput'],
             'slo_met_count_cumulative': self.metrics['slo_met_count'],
             'slo_violated_count_cumulative': self.metrics['slo_violated_count']
@@ -381,25 +381,23 @@ class LogToCsvProcessor:
                     if req_id in self.requests:
                         req_data = self.requests[req_id]
                         processing_time_ns = completion_time_ns - req_data['arrival_time_ns']
-                        processing_time_us = processing_time_ns / 1000.0
+                        processing_time_us = processing_time_ns
 
-                        # SLO Check
+                        # SLO Check - ensure we're using the current SLO thresholds from config
                         model_slo_us = MODEL_SLOS_US.get(req_data['model_name'], DEFAULT_SLO_US)
-                        processing_time_us = processing_time_ns / 1000.0
-                        slo_status = "Met" if processing_time_us <= model_slo_us else "Violated"
+                        processing_time_us = processing_time_ns  # Already in microseconds in your updated code
                         
-                        # Log SLO check details at trace level
-                        logger.debug(f"SLO check for {req_data['model_name']}: " 
-                                    f"Processing time: {processing_time_us:.2f} μs, "
-                                    f"SLO threshold: {model_slo_us} μs, "
-                                    f"Status: {slo_status}")
-
-                        if slo_status == "Met":
-                            self.metrics['slo_met_count'] += 1
-                            self.metrics['models'][req_data['model_name']]['slo_met_count'] += 1
-                        else:
+                        # Add detailed SLO logging for debugging
+                        if processing_time_us > model_slo_us:
+                            logger.warning(f"SLO VIOLATION: Model {req_data['model_name']} processing time {processing_time_us}μs > threshold {model_slo_us}μs")
+                            slo_status = "Violated"
                             self.metrics['slo_violated_count'] += 1
                             self.metrics['models'][req_data['model_name']]['slo_violated_count'] += 1
+                        else:
+                            logger.debug(f"SLO MET: Model {req_data['model_name']} processing time {processing_time_us}μs <= threshold {model_slo_us}μs") 
+                            slo_status = "Met"
+                            self.metrics['slo_met_count'] += 1
+                            self.metrics['models'][req_data['model_name']]['slo_met_count'] += 1
                         
                         self.processed_requests_details.append({
                             'request_id': req_id,
@@ -416,7 +414,7 @@ class LogToCsvProcessor:
                         self.metrics['processed_requests'] += 1
                         self.metrics['models'][model_name]['processed_count'] += 1
                         num_processed_in_this_batch +=1
-                        total_processing_time_us_this_batch += (processing_time_ns / 1000.0) 
+                        total_processing_time_us_this_batch += (processing_time_ns) 
                         
                         # Update overall avg processing time (cumulative moving average, in nanoseconds)
                         self.metrics['avg_processing_time_ns'] += (processing_time_ns - self.metrics['avg_processing_time_ns']) / self.metrics['processed_requests']

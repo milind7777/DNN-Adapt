@@ -68,6 +68,9 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
                 }
             }
             
+            const auto now = std::chrono::high_resolution_clock::now();
+            auto time_since_epoch = now.time_since_epoch();
+            auto current_second = std::chrono::duration_cast<std::chrono::microseconds>(time_since_epoch).count();
             // logging request rate
             LOG_TRACE(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
 
