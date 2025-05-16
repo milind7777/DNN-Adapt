@@ -47,11 +47,14 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
         now.time_since_epoch()
     ).count();
 
+    // get time within which batch will be processed
+    auto est_process_time = time_now + (int)((latency_slo / 2) * 1000);
+
     // try to form batch from buffer first
     if(buffer != nullptr) {
         // discard buffer is stale
-        auto request_wait_time = static_cast<double>(time_now - buffer->arrival_time) / 1000.0;
-        if(request_wait_time >= latency_slo) {
+        auto request_slo_time = buffer->arrival_time + (int)(latency_slo * 1000);
+        if(est_process_time > request_slo_time) {
             LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             buffer = nullptr;
         } else {
@@ -72,8 +75,8 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
         std::shared_ptr<InferenceRequest> request;
         if(queue.try_dequeue(request)) {
             // discard stale requests
-            auto request_wait_time = static_cast<double>(time_now - request->arrival_time) / 1000.0;
-            if(request_wait_time >= latency_slo) {
+            auto request_slo_time = buffer->arrival_time + (int)(latency_slo * 1000);
+            if(est_process_time >= request_slo_time) {
                 LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, request->request_count, time_now);
             } else {
                 last_request_arrival_time = request->arrival_time;
