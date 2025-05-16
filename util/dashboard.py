@@ -25,6 +25,8 @@ MODEL_METRICS_CSV = os.path.join(CSV_DATA_DIR, "model_metrics_live.csv")
 REQUEST_RATE_HISTORY_CSV = os.path.join(CSV_DATA_DIR, "request_rate_history.csv")
 PERFORMANCE_HISTORY_CSV = os.path.join(CSV_DATA_DIR, "performance_history.csv")
 RECENT_REQUESTS_DETAILS_CSV = os.path.join(CSV_DATA_DIR, "recent_requests_details.csv")
+SECOND_VIOLATIONS_CSV = os.path.join(CSV_DATA_DIR, "second_violations.csv")
+SECOND_REQUESTS_CSV = os.path.join(CSV_DATA_DIR, "second_requests.csv")
 
 
 def read_csv_safely(file_path, default_df_cols=None):
@@ -73,8 +75,11 @@ class CSVDashboard:
             ], className="mb-4"),
             dbc.Row([
                 dbc.Col(dbc.Card([dbc.CardHeader(html.H4("SLO Violations - Cummulative", className="m-0")), dbc.CardBody(dcc.Graph(id="slo-violation-bar", style={"height": "350px"}))]), width=6),
+                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Incoming Requests Per Second", className="m-0")), dbc.CardBody(dcc.Graph(id="second-requests-graph", style={"height": "350px"}))]), width=6)
+            ], className="mb-4"),
+            dbc.Row([
                 dbc.Col(dbc.Card([dbc.CardHeader(html.H4("SLO Violations", className="m-0")), dbc.CardBody(dcc.Graph(id="slo-violation-buckets", style={"height": "350px"}))]), width=6),
-                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Request Processing Timeline (Recent)", className="m-0")), dbc.CardBody(dcc.Graph(id="request-timeline", style={"height": "350px"}))]), width=6)
+                dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Request Processing Timeline", className="m-0")), dbc.CardBody(dcc.Graph(id="request-timeline", style={"height": "350px"}))]), width=6)
             ], className="mb-4"),
             dbc.Row([
                 dbc.Col(dbc.Card([dbc.CardHeader(html.H4("Recent Requests Details", className="m-0")), dbc.CardBody(html.Div(id="recent-requests-table"))]), width=12)
@@ -161,22 +166,102 @@ class CSVDashboard:
             df = read_csv_safely(REQUEST_RATE_HISTORY_CSV, default_df_cols=['timestamp', 'model_name', 'rate'])
             if df.empty or len(df) <= 1: return go.Figure().update_layout(title="Request Rate Over Time (No data)")
             
+            # Convert timestamps to datetime for proper display
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+            
+            # Double-check that there's only one entry per second per model
+            agg_df = df.groupby([df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S'), 'model_name'])['rate'].last().reset_index()
+            agg_df['timestamp'] = pd.to_datetime(agg_df['timestamp'])
+            
+            # Sort for consistent plotting
+            agg_df = agg_df.sort_values('timestamp')
+            
+            # Log the result after aggregation
+            logger.info(f"Request rate data points: {len(agg_df)}")
+            
             fig = go.Figure()
-            models = df['model_name'].unique()
+            models = agg_df['model_name'].unique()
             colors = px.colors.qualitative.Plotly
             
-            df['timestamp'] = pd.to_datetime(df['timestamp']) # Ensure datetime for proper sorting/plotting
-            df = df.sort_values(by='timestamp')
-
-
-            for i, model in enumerate(models):
-                model_df = df[df['model_name'] == model]
-                if not model_df.empty:
+            # Create continuous time series for each model
+            all_times = sorted(agg_df['timestamp'].unique())
+            
+            if len(all_times) > 0:
+                # Find min and max times for setting the axis range
+                min_time = all_times[0]
+                max_time = all_times[-1]
+                
+                # Create continuous time series for each model
+                for i, model in enumerate(models):
+                    model_data = agg_df[agg_df['model_name'] == model].copy()
+                    
+                    # Create a complete time range with all seconds
+                    full_range = pd.date_range(start=min_time, end=max_time, freq='1s')
+                    complete_df = pd.DataFrame({'timestamp': full_range})
+                    
+                    # Merge with the actual data points
+                    model_complete = pd.merge(
+                        complete_df,
+                        model_data,
+                        on='timestamp',
+                        how='left'
+                    )
+                    
+                    # Fill missing values with forward fill then backward fill, then zeros
+                    model_complete['rate'] = model_complete['rate'].fillna(method='ffill').fillna(method='bfill').fillna(0)
+                    model_complete['model_name'] = model
+                    
+                    # Plot as a continuous line
                     fig.add_trace(go.Scatter(
-                        x=model_df['timestamp'], y=model_df['rate'], mode='lines', name=f'{model} Rate',
-                        line=dict(width=3, color=colors[i % len(colors)]), fill='tozeroy'
+                        x=model_complete['timestamp'], 
+                        y=model_complete['rate'], 
+                        mode='lines', 
+                        name=f'{model} Rate',
+                        line=dict(width=3, color=colors[i % len(colors)]), 
+                        fill='tozeroy'
                     ))
-            fig.update_layout(title="Request Rate Over Time", xaxis_title="Time", yaxis_title="Requests per Second", hovermode="x unified", legend=dict(x=0.01, y=0.99), margin=dict(l=50,r=50,t=50,b=50), transition_duration=300) # Removed height here, set in layout
+
+            # Add annotation showing the current request rate for each model
+            if len(all_times) > 0:
+                latest_time = all_times[-1]
+                model_stats = []
+                
+                for model in models:
+                    latest_model_data = agg_df[(agg_df['model_name'] == model) & 
+                                             (agg_df['timestamp'] == latest_time)]
+                    if not latest_model_data.empty:
+                        rate = latest_model_data['rate'].iloc[0]
+                        model_stats.append(f"{model}: {int(rate)} req/s")
+                
+                if model_stats:
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.99,
+                        text=f"<b>Current Request Rates:</b><br>" + "<br>".join(model_stats),
+                        showarrow=False,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="darkgrey",
+                        borderwidth=1,
+                        borderpad=4,
+                        align="left"
+                    )
+
+            # Limit to last 2 minutes for better visibility
+            if len(all_times) > 1:
+                latest_time = all_times[-1]
+                two_minutes_ago = latest_time - pd.Timedelta(minutes=2)
+                fig.update_xaxes(range=[two_minutes_ago, latest_time])
+            
+            fig.update_layout(
+                title="Request Rate Over Time", 
+                xaxis_title="Time", 
+                yaxis_title="Requests per Second", 
+                hovermode="x unified", 
+                legend=dict(x=0.01, y=0.99), 
+                margin=dict(l=50,r=50,t=50,b=50), 
+                transition_duration=300
+            )
+            
             return fig
 
         @self.app.callback(Output("throughput-graph", "figure"), Input("interval-component", "n_intervals"))
@@ -312,157 +397,120 @@ class CSVDashboard:
 
         @self.app.callback(Output("slo-violation-buckets", "figure"), Input("interval-component", "n_intervals"))
         def update_slo_violation_buckets(n):
-            # Get the recent requests details for per-second analysis
-            df = read_csv_safely(RECENT_REQUESTS_DETAILS_CSV, default_df_cols=[
-                'arrival_time_readable', 'model_name', 'slo_status', 'processing_time_us'
-            ])
+            # Use the dedicated CSV file for per-second violations
+            df = read_csv_safely(SECOND_VIOLATIONS_CSV, default_df_cols=['timestamp', 'model_name', 'violation_count'])
             
             if df.empty:
                 return go.Figure().update_layout(title="SLO Violations Per Second (No data)")
-                
-            # Convert arrival timestamps to datetime for bucketing
-            df['arrival_time_readable'] = pd.to_datetime(df['arrival_time_readable'], errors='coerce')
-            
+
+            # Make sure timestamp is a string first before processing
+            df['timestamp'] = df['timestamp'].astype(str)
+
+            # Convert timestamps to datetime for proper display
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+
             # Drop rows with invalid timestamps
-            df = df.dropna(subset=['arrival_time_readable'])
+            df = df.dropna(subset=['timestamp'])
             if df.empty:
                 return go.Figure().update_layout(title="SLO Violations Per Second (No valid timestamps)")
             
-            # Round down to nearest second for bucketing (EXACT SECONDS, not sliding window)
-            # This creates discrete non-overlapping 1-second buckets
-            df['time_bucket'] = df['arrival_time_readable'].dt.floor('1s')
+            # Round down to nearest second for bucketing
+            df['time_bucket'] = df['timestamp'].dt.floor('1s')
             
-            # Count violations and total requests per bucket and model
-            buckets = []
-            # Group by time bucket (second) and model name
-            for (time_bucket, model), group in df.groupby(['time_bucket', 'model_name']):
-                total_requests = len(group)
-                violations = sum(group['slo_status'] == 'Violated')
-                met = total_requests - violations
-                buckets.append({
-                    'time_bucket': time_bucket,
-                    'model_name': model,
-                    'total_requests': total_requests,
-                    'violations': violations,
-                    'met': met,
-                    'violation_rate': (violations / total_requests * 100) if total_requests > 0 else 0
-                })
-                
-            if not buckets:
-                return go.Figure().update_layout(title="SLO Violations Per Second (No data)")
-                
-            bucket_df = pd.DataFrame(buckets)
+            # The data should already be aggregated by timestamp and model from the log processor,
+            # but let's double-check to ensure we have only one data point per second per model
+            agg_df = df.groupby(['time_bucket', 'model_name'])['violation_count'].sum().reset_index()
             
-            # Sort by time for consistent display
-            bucket_df = bucket_df.sort_values('time_bucket')
+            # Log what we're working with
+            logger.info(f"SLO violations data points: {len(agg_df)}")
             
-            # Get the most recent 60 seconds for better visibility
-            if len(bucket_df) > 2:
-                current_time = bucket_df['time_bucket'].max()
-                lookback_seconds = 60
-                min_time = current_time - pd.Timedelta(seconds=lookback_seconds)
-                bucket_df = bucket_df[bucket_df['time_bucket'] >= min_time]
-    
-            # Create figure with lines for violations and violation rate
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            # Add lines for violations by model
-            models = bucket_df['model_name'].unique()
+            # Get unique models
+            models = agg_df['model_name'].unique()
             colors = px.colors.qualitative.Plotly[:len(models)]
             
-            # Create a complete time range for the entire period (every second)
-            full_time_range = pd.date_range(
-                start=bucket_df['time_bucket'].min(),
-                end=bucket_df['time_bucket'].max(),
-                freq='1s'
-            )
+            # Create figure
+            fig = go.Figure()
             
-            # For each model, ensure we have all time buckets represented
-            for i, model in enumerate(models):
-                model_data = bucket_df[bucket_df['model_name'] == model].copy()
+            # Get all unique time buckets to ensure continuous time series
+            all_times = sorted(agg_df['time_bucket'].unique())
+            
+            if len(all_times) > 0:
+                # Find min and max times for setting the axis range
+                min_time = all_times[0]
+                max_time = all_times[-1]
                 
-                # Create a complete dataframe with all time buckets for this model
-                complete_df = pd.DataFrame({'time_bucket': full_time_range})
-                
-                # Merge with actual data - this ensures we have a row for each second
-                complete_df = complete_df.merge(model_data, on='time_bucket', how='left')
-                
-                # Fill missing values with zeros - ensures zero violations for seconds with no data
-                complete_df['violations'] = complete_df['violations'].fillna(0)
-                complete_df['met'] = complete_df['met'].fillna(0)
-                complete_df['total_requests'] = complete_df['total_requests'].fillna(0)
-                complete_df['violation_rate'] = complete_df['violation_rate'].fillna(0)
-                complete_df['model_name'] = model
-                
-                # Add violations trace
-                fig.add_trace(go.Scatter(
-                    x=complete_df['time_bucket'],
-                    y=complete_df['violations'],
-                    name=f"{model} Violations",
-                    mode='lines+markers',
-                    line=dict(color=colors[i], width=2.5),
-                    marker=dict(size=6),
-                    hovertemplate=
-                    '<b>%{x}</b><br>' +
-                    f'Model: {model}<br>' +
-                    'Violations: %{y}<br>' +
-                    'Requests: %{customdata[0]}<br>' +
-                    'Violation Rate: %{customdata[1]:.1f}%',
-                    customdata=np.column_stack((
-                        complete_df['total_requests'], 
-                        complete_df['violation_rate']
+                # Create continuous time series for each model
+                for i, model in enumerate(models):
+                    model_data = agg_df[agg_df['model_name'] == model].copy()
+                    
+                    # Create a complete time range with all seconds
+                    full_range = pd.date_range(start=min_time, end=max_time, freq='1s')
+                    complete_df = pd.DataFrame({'time_bucket': full_range})
+                    
+                    # Merge with the actual data points
+                    model_complete = pd.merge(
+                        complete_df,
+                        model_data,
+                        on='time_bucket',
+                        how='left'
+                    )
+                    
+                    # Fill missing values with zeros
+                    model_complete['violation_count'] = model_complete['violation_count'].fillna(0)
+                    model_complete['model_name'] = model
+                    
+                    # Plot as a continuous line
+                    fig.add_trace(go.Scatter(
+                        x=model_complete['time_bucket'],
+                        y=model_complete['violation_count'],
+                        mode='lines+markers',
+                        name=f'{model} Violations',
+                        line=dict(color=colors[i % len(colors)], width=2, shape='linear'),
+                        marker=dict(size=6),
+                        connectgaps=True  # Connect across gaps (zeros)
                     ))
-                ), secondary_y=False)
-                
-                # Add SLO Met count on the same primary y-axis
-                fig.add_trace(go.Scatter(
-                    x=complete_df['time_bucket'],
-                    y=complete_df['met'],
-                    name=f"{model} Met",
-                    mode='lines+markers',
-                    line=dict(color=colors[i], width=2, dash='dash'),
-                    marker=dict(size=5, symbol='circle-open'),
-                    opacity=0.7
-                ), secondary_y=False)
-                
-                # Add violation rate on secondary y-axis
-                fig.add_trace(go.Scatter(
-                    x=complete_df['time_bucket'],
-                    y=complete_df['violation_rate'],
-                    mode='lines',
-                    name=f"{model} Rate %",
-                    line=dict(color=colors[i], width=1, dash='dot'),
-                    opacity=0.6
-                ), secondary_y=True)
     
-            # Update layout for better readability
+            # Create annotation for latest violations
+            if len(all_times) > 0:
+                latest_time = all_times[-1]
+                model_stats = []
+                
+                for model in models:
+                    latest_model_data = agg_df[(agg_df['model_name'] == model) & 
+                                              (agg_df['time_bucket'] == latest_time)]
+                    if not latest_model_data.empty:
+                        count = latest_model_data['violation_count'].iloc[0]
+                        if count > 0:
+                            model_stats.append(f"{model}: {int(count)} violations")
+                
+                if model_stats:
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.99,
+                        text=f"<b>Latest SLO Violations:</b><br>" + "<br>".join(model_stats),
+                        showarrow=False,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="darkgrey",
+                        borderwidth=1,
+                        borderpad=4,
+                        align="left"
+                    )
+            
+            # Limit to last 2 minutes
+            if len(all_times) > 1:
+                latest_time = all_times[-1]
+                two_minutes_ago = latest_time - pd.Timedelta(minutes=2)
+                fig.update_xaxes(range=[two_minutes_ago, latest_time])
+            
             fig.update_layout(
-                title="SLO Violations Per Second",
-                xaxis_title="Wall Clock Time",
-                hovermode="closest",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                title="SLO Violations Per Second (Non-Cumulative)",
+                xaxis_title="Time",
+                yaxis_title="Violation Count",
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1),
                 margin=dict(l=50, r=50, t=50, b=50),
-                plot_bgcolor='rgba(240,240,240,0.9)',  # Light gray background
-                transition_duration=300
-            )
-            
-            # Improve y-axis labels
-            fig.update_yaxes(
-                title_text="Count Per Second",
-                secondary_y=False,
-                gridcolor='white'
-            )
-            fig.update_yaxes(
-                title_text="Violation Rate %", 
-                secondary_y=True, 
-                range=[0, 100],
-                gridcolor='white'
-            )
-            
-            # Format x-axis to show HH:MM:SS only
-            fig.update_xaxes(
-                tickformat="%H:%M:%S",
-                gridcolor='white'
+                transition_duration=300,
+                plot_bgcolor='rgba(240,240,240,0.9)'
             )
             
             return fig
@@ -648,6 +696,124 @@ class CSVDashboard:
                 table = dbc.Table.from_dataframe(df_display, striped=True, bordered=True, hover=True, className="table-sm")
             
             return table
+
+        @self.app.callback(Output("second-requests-graph", "figure"), Input("interval-component", "n_intervals"))
+        def update_second_requests_graph(n):
+            # Use the dedicated CSV file for per-second request counts
+            df = read_csv_safely(REQUEST_RATE_HISTORY_CSV, default_df_cols=['timestamp', 'model_name', 'rate'])
+            
+            if df.empty:
+                return go.Figure().update_layout(title="Incoming Requests Per Second (No data)")
+
+            # Make sure timestamp is a string first before processing
+            df['timestamp'] = df['timestamp'].astype(str)
+
+            # Convert timestamps to datetime for proper display
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+
+            # Drop rows with invalid timestamps
+            df = df.dropna(subset=['timestamp'])
+            if df.empty:
+                return go.Figure().update_layout(title="Incoming Requests Per Second (No valid timestamps)")
+            
+            # Only keep the date part up to seconds (no milliseconds)
+            df['time_bucket'] = df['timestamp'].dt.floor('1s')
+            
+            # Ensure we have only one entry per second per model by summing request counts
+            agg_df = df.groupby(['time_bucket', 'model_name'])['rate'].sum().reset_index()
+            
+            # Log what we're working with
+            logger.info(f"Incoming requests data points after aggregation: {len(agg_df)}")
+            
+            # Get unique models
+            models = agg_df['model_name'].unique()
+            colors = px.colors.qualitative.Plotly[:len(models)]
+            
+            # Create figure
+            fig = go.Figure()
+            
+            # Get all unique time buckets to ensure continuous time series
+            all_times = sorted(agg_df['time_bucket'].unique())
+            
+            if len(all_times) > 0:
+                # Find min and max times for setting the axis range
+                min_time = all_times[0]
+                max_time = all_times[-1]
+                
+                # Create continuous time series for each model
+                for i, model in enumerate(models):
+                    model_data = agg_df[agg_df['model_name'] == model].copy()
+                    
+                    # Create a complete time range with all seconds
+                    full_range = pd.date_range(start=min_time, end=max_time, freq='1s')
+                    complete_df = pd.DataFrame({'time_bucket': full_range})
+                    
+                    # Merge with the actual data points
+                    model_complete = pd.merge(
+                        complete_df,
+                        model_data,
+                        on='time_bucket',
+                        how='left'
+                    )
+                    
+                    # Fill missing values with zeros
+                    model_complete['rate'] = model_complete['rate'].fillna(0)
+                    model_complete['model_name'] = model
+                    
+                    # Plot as a continuous line
+                    fig.add_trace(go.Scatter(
+                        x=model_complete['time_bucket'],
+                        y=model_complete['rate'],
+                        mode='lines+markers',
+                        name=f'{model} Requests',
+                        line=dict(color=colors[i % len(colors)], width=2, shape='linear'),
+                        marker=dict(size=6),
+                        connectgaps=True  # Connect across gaps (zeros)
+                    ))
+    
+            # Create annotation showing the last request counts for each model
+            if len(all_times) > 0:
+                latest_time = all_times[-1]
+                model_stats = []
+                
+                for model in models:
+                    latest_model_data = agg_df[(agg_df['model_name'] == model) & 
+                                             (agg_df['time_bucket'] == latest_time)]
+                    if not latest_model_data.empty:
+                        count = latest_model_data['rate'].iloc[0]
+                        model_stats.append(f"{model}: {int(count)} requests")
+                
+                if model_stats:
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.99,
+                        text=f"<b>Latest Incoming Requests:</b><br>" + "<br>".join(model_stats),
+                        showarrow=False,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="darkgrey",
+                        borderwidth=1,
+                        borderpad=4,
+                        align="left"
+                    )
+            
+            # Limit to last 2 minutes
+            if len(all_times) > 1:
+                latest_time = all_times[-1]
+                two_minutes_ago = latest_time - pd.Timedelta(minutes=2)
+                fig.update_xaxes(range=[two_minutes_ago, latest_time])
+    
+            fig.update_layout(
+                title="Incoming Requests Per Second",
+                xaxis_title="Time",
+                yaxis_title="Request Count",
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1),
+                margin=dict(l=50, r=50, t=50, b=50),
+                transition_duration=300,
+                plot_bgcolor='rgba(240,240,240,0.9)'
+            )
+            
+            return fig
 
     def run(self, debug=False, port=8051): # Changed port to avoid conflict if old monitor runs
         logger.info(f"Starting CSV Dashboard on http://127.0.0.1:{port}")

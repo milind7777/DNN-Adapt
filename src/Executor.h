@@ -138,12 +138,12 @@ private:
                 assert(false);
             }          
 
-            // hack to test parallel execution on gpu streams
+            /* // hack to test parallel execution on gpu streams
             if(nodeList.size() > 0) {
                 for(int i=0;i<nodeList[0]->session_list.size();i++) {
                     nodeList[0]->session_list[i].second.second = 1;
                 }
-            }
+            } */
 
             // update NodeRunners with new schedule
             for(int i=0;i<nodeList.size();i++) {

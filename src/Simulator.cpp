@@ -73,6 +73,7 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
             auto current_second = std::chrono::duration_cast<std::chrono::microseconds>(time_since_epoch).count();
             // logging request rate
             LOG_TRACE(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
+            LOG_TRACE(_logger, "Simulation Current Rate @ Current time: {} for model {} is @ rate {}", current_second, request->model_name, request_rate);
 
             // get total request count by adding fractional count leftover from previous block
             auto request_count = request_rate * QUANTIZATION_INTERVAL + residual_fraction;
@@ -111,12 +112,14 @@ void Simulator::run() {
     // };
 
     schedules["resnet18"] = {
+        {rate_type::flat, {10, {0}}},
         {rate_type::ramp, {10, {2}}},
         {rate_type::flat, {40, {10}}},
         {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     schedules["vit16"] = {
+        {rate_type::flat, {10, {0}}},
         {rate_type::ramp, {5, {2}}},
         {rate_type::flat, {30, {10}}},
         {rate_type::exponential_decay, {20, {0.8}}}

@@ -14,6 +14,10 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     auto slot_index = current_second % (RATE_CALCULATION_DURATION + 1);
     Slot& slot = slots[slot_index]; 
 
+    // Log each incoming request with count and timestamp for per-second tracking
+    auto time_now = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    LOG_INFO(_logger, "REQUEST RECEIVED: model_name:{} request_count:{} time_now:{}", model_name, request_count, time_now);
+
     long expected_second = slot.last_active_second.load(std::memory_order_acquire);
     if(expected_second != current_second) {
         // reset this slot counter
