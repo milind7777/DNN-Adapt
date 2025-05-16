@@ -1,3 +1,0 @@
-model_name,request_count,processed_count,avg_processing_time_us,target_rate,slo_met_count,slo_violated_count
-resnet18,0,0,0,11,0,0
-vit16,0,0,0,10,0,0
