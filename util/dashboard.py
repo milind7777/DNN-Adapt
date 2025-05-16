@@ -10,6 +10,7 @@ import os
 import datetime
 import time
 import logging
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -327,11 +328,13 @@ class CSVDashboard:
             if df.empty:
                 return go.Figure().update_layout(title="SLO Violations Per Second (No valid timestamps)")
             
-            # Round down to nearest second for bucketing
+            # Round down to nearest second for bucketing (EXACT SECONDS, not sliding window)
+            # This creates discrete non-overlapping 1-second buckets
             df['time_bucket'] = df['arrival_time_readable'].dt.floor('1s')
             
             # Count violations and total requests per bucket and model
             buckets = []
+            # Group by time bucket (second) and model name
             for (time_bucket, model), group in df.groupby(['time_bucket', 'model_name']):
                 total_requests = len(group)
                 violations = sum(group['slo_status'] == 'Violated')
@@ -353,11 +356,9 @@ class CSVDashboard:
             # Sort by time for consistent display
             bucket_df = bucket_df.sort_values('time_bucket')
             
-            # Get the most recent 30-60 seconds for better visibility
-            # This ensures we show a continuous window of previous seconds' data
+            # Get the most recent 60 seconds for better visibility
             if len(bucket_df) > 2:
                 current_time = bucket_df['time_bucket'].max()
-                # Show 60 seconds of data, but all if less is available
                 lookback_seconds = 60
                 min_time = current_time - pd.Timedelta(seconds=lookback_seconds)
                 bucket_df = bucket_df[bucket_df['time_bucket'] >= min_time]
@@ -369,77 +370,100 @@ class CSVDashboard:
             models = bucket_df['model_name'].unique()
             colors = px.colors.qualitative.Plotly[:len(models)]
             
+            # Create a complete time range for the entire period (every second)
+            full_time_range = pd.date_range(
+                start=bucket_df['time_bucket'].min(),
+                end=bucket_df['time_bucket'].max(),
+                freq='1s'
+            )
+            
+            # For each model, ensure we have all time buckets represented
             for i, model in enumerate(models):
                 model_data = bucket_df[bucket_df['model_name'] == model].copy()
                 
-                # Ensure data is sorted by time for continuous lines
-                model_data = model_data.sort_values('time_bucket')
+                # Create a complete dataframe with all time buckets for this model
+                complete_df = pd.DataFrame({'time_bucket': full_time_range})
                 
-                if not model_data.empty:
-                    # Fill in missing time buckets with zeros to ensure continuous lines
-                    # Create a complete time range from min to max with 1 second intervals
-                    full_time_range = pd.date_range(
-                        start=model_data['time_bucket'].min(),
-                        end=model_data['time_bucket'].max(),
-                        freq='1s'
-                    )
-                    
-                    # Create a complete dataframe with all time buckets
-                    complete_df = pd.DataFrame({'time_bucket': full_time_range})
-                    # Merge with actual data
-                    complete_df = complete_df.merge(model_data, on='time_bucket', how='left')
-                    # Fill missing values with zeros
-                    complete_df['violations'] = complete_df['violations'].fillna(0)
-                    complete_df['met'] = complete_df['met'].fillna(0)
-                    complete_df['violation_rate'] = complete_df['violation_rate'].fillna(0)
-                    complete_df['model_name'] = model
-                    
-                    # Non-cumulative violations count per second with continuous lines
-                    fig.add_trace(go.Scatter(
-                        x=complete_df['time_bucket'],
-                        y=complete_df['violations'],
-                        name=f"{model} Violations",
-                        mode='lines+markers',
-                        line=dict(color=colors[i], width=3, shape='linear'),  # Using shape='linear' for straight lines
-                        marker=dict(size=8),
-                        connectgaps=True  # Connect gaps to ensure continuous line
-                    ), secondary_y=False)
-                    
-                    # Add SLO Met count on the same primary y-axis
-                    fig.add_trace(go.Scatter(
-                        x=complete_df['time_bucket'],
-                        y=complete_df['met'],
-                        name=f"{model} Met",
-                        mode='lines+markers',
-                        line=dict(color=colors[i], width=3, dash='dash', shape='linear'),
-                        marker=dict(size=6),
-                        connectgaps=True
-                    ), secondary_y=False)
-                    
-                    # Violation rate on secondary y-axis (percentage)
-                    fig.add_trace(go.Scatter(
-                        x=complete_df['time_bucket'],
-                        y=complete_df['violation_rate'],
-                        mode='lines+markers',
-                        name=f"{model} Rate %",
-                        line=dict(color=colors[i], dash='dot', width=2, shape='linear'),
-                        marker=dict(symbol='x', size=6),
-                        connectgaps=True
-                    ), secondary_y=True)
+                # Merge with actual data - this ensures we have a row for each second
+                complete_df = complete_df.merge(model_data, on='time_bucket', how='left')
+                
+                # Fill missing values with zeros - ensures zero violations for seconds with no data
+                complete_df['violations'] = complete_df['violations'].fillna(0)
+                complete_df['met'] = complete_df['met'].fillna(0)
+                complete_df['total_requests'] = complete_df['total_requests'].fillna(0)
+                complete_df['violation_rate'] = complete_df['violation_rate'].fillna(0)
+                complete_df['model_name'] = model
+                
+                # Add violations trace
+                fig.add_trace(go.Scatter(
+                    x=complete_df['time_bucket'],
+                    y=complete_df['violations'],
+                    name=f"{model} Violations",
+                    mode='lines+markers',
+                    line=dict(color=colors[i], width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate=
+                    '<b>%{x}</b><br>' +
+                    f'Model: {model}<br>' +
+                    'Violations: %{y}<br>' +
+                    'Requests: %{customdata[0]}<br>' +
+                    'Violation Rate: %{customdata[1]:.1f}%',
+                    customdata=np.column_stack((
+                        complete_df['total_requests'], 
+                        complete_df['violation_rate']
+                    ))
+                ), secondary_y=False)
+                
+                # Add SLO Met count on the same primary y-axis
+                fig.add_trace(go.Scatter(
+                    x=complete_df['time_bucket'],
+                    y=complete_df['met'],
+                    name=f"{model} Met",
+                    mode='lines+markers',
+                    line=dict(color=colors[i], width=2, dash='dash'),
+                    marker=dict(size=5, symbol='circle-open'),
+                    opacity=0.7
+                ), secondary_y=False)
+                
+                # Add violation rate on secondary y-axis
+                fig.add_trace(go.Scatter(
+                    x=complete_df['time_bucket'],
+                    y=complete_df['violation_rate'],
+                    mode='lines',
+                    name=f"{model} Rate %",
+                    line=dict(color=colors[i], width=1, dash='dot'),
+                    opacity=0.6
+                ), secondary_y=True)
     
-            # Update layout
+            # Update layout for better readability
             fig.update_layout(
-                title="SLO Violations Per Second (Non-Cumulative)",
-                xaxis_title="Time",
-                hovermode="x unified",
-                legend=dict(orientation="h", y=1.1),
+                title="SLO Violations Per Second",
+                xaxis_title="Wall Clock Time",
+                hovermode="closest",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 margin=dict(l=50, r=50, t=50, b=50),
+                plot_bgcolor='rgba(240,240,240,0.9)',  # Light gray background
                 transition_duration=300
             )
             
-            # Change primary y-axis title from "Requests Per Second" to "Violation Counts"
-            fig.update_yaxes(title_text="Violation Counts", secondary_y=False)
-            fig.update_yaxes(title_text="Violation Rate %", secondary_y=True, range=[0, 100])
+            # Improve y-axis labels
+            fig.update_yaxes(
+                title_text="Count Per Second",
+                secondary_y=False,
+                gridcolor='white'
+            )
+            fig.update_yaxes(
+                title_text="Violation Rate %", 
+                secondary_y=True, 
+                range=[0, 100],
+                gridcolor='white'
+            )
+            
+            # Format x-axis to show HH:MM:SS only
+            fig.update_xaxes(
+                tickformat="%H:%M:%S",
+                gridcolor='white'
+            )
             
             return fig
 
@@ -628,6 +652,30 @@ class CSVDashboard:
     def run(self, debug=False, port=8051): # Changed port to avoid conflict if old monitor runs
         logger.info(f"Starting CSV Dashboard on http://127.0.0.1:{port}")
         self.app.run(debug=debug, port=port, host='0.0.0.0')
+
+    def _format_timestamp_readable(self, timestamp_ns):
+        """
+        Convert nanosecond timestamp to readable format.
+        
+        This function handles conversion from high_resolution_clock timestamps
+        to wall clock time for display purposes.
+        """
+        try:
+            # Simple conversion from nanoseconds to seconds
+            seconds = timestamp_ns / 1_000_000_000.0
+            
+            # Check if this is likely a monotonic clock timestamp
+            if seconds < 1600000000:  # Timestamps before ~2020 are likely monotonic clock times
+                # For monotonic clocks, show relative time from an arbitrary reference
+                # This preserves timing relationships while making it human-readable
+                return f"T+{seconds:.3f}s"  # "T+" prefix indicates this is relative time
+            else:
+                # This is likely a wall clock (epoch) timestamp
+                dt = datetime.datetime.fromtimestamp(seconds)
+                return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]  # Format to millisecond precision
+        except (ValueError, OverflowError) as e:
+            logger.error(f"Error converting timestamp {timestamp_ns}: {e}")
+            return f"Invalid({timestamp_ns})"
 
 if __name__ == "__main__":
     dashboard = CSVDashboard()
