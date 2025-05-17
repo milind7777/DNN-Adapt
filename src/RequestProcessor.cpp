@@ -52,7 +52,8 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
     ).count();
 
     // get time within which batch will be processed
-    auto est_process_time = time_now + (int64_t)((latency_slo / 2) * 1000);
+    // auto est_process_time = time_now + (int64_t)((latency_slo / 2) * 1000);
+    auto est_process_time = time_now;
 
     // try to form batch from buffer first
     if(buffer != nullptr) {
