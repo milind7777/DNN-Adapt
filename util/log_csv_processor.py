@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 #  Configuration 
-LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN-Adapt/logs/experiment1/dnn_adapt.log'
+LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN-Adapt/logs/experiment/dnn_adapt.log'
 CSV_OUTPUT_DIR = '/home/cching1/DNNAdapt/DNN-Adapt/util/csv_data_cache' # Ensure this directory exists
 MAX_HISTORY_CSV_ROWS = 5000 # For history CSVs to prevent them from growing indefinitely
 RECENT_REQUESTS_LIMIT = 200 # For recent_requests_details.csv
@@ -50,6 +50,8 @@ class LogToCsvProcessor:
         self.csv_dir = csv_dir
         self.max_history_rows = max_history_rows
         self.recent_requests_limit = recent_requests_limit
+
+        
 
         os.makedirs(self.csv_dir, exist_ok=True)
 
@@ -562,9 +564,16 @@ class LogToCsvProcessor:
                 # Record the request in second_requests
                 self.second_requests[request_second][model_name] += request_count
                 
+                # IMPORTANT FIX: Update total_requests with the request_count, not just incrementing by 1
+                # This ensures we count the actual number of requests correctly
+                self.metrics['total_requests'] += request_count
+                self.metrics['models'][model_name]['request_count'] += request_count
+                
                 # Debug log
                 logger.debug(f"Request Received: {model_name}, count: {request_count}, time: {request_second}")
-            
+                
+                return  # Return early after processing REQUEST RECEIVED
+
             # Check for SLO violation warnings from RequestProcessor
             match_slo_violation = self.re_slo_violation.search(line)
             if match_slo_violation:
@@ -585,13 +594,15 @@ class LogToCsvProcessor:
                 
                 # Debug log
                 logger.debug(f"SLO Violation: {model_name}, count: {request_count}, time: {violation_timestamp}")
-
+                
+                return  # Return early after processing SLO violation
+            
+            # Rest of the existing code for processing other log patterns
             match_simulate = self.re_simulate_rate.search(line)
             if match_simulate:
                 rate, model_name = match_simulate.groups()
                 self.models_seen.add(model_name)
                 self.metrics['models'][model_name]['target_rate'] = int(rate)
-                # No longer adding to request_rate_history_data here - this is now done in _update_history_data_capture
                 return
 
             match_formed = self.re_batch_formed.search(line)
@@ -613,17 +624,18 @@ class LogToCsvProcessor:
                 self.models_seen.add(model_name)
                 
                 request_id = f"{batch_id}_{arrival_time_ns_str}" # Simpler unique ID
+                request_count = int(request_count_str)
                 self.requests[request_id] = {
                     'model_name': model_name,
                     'batch_id': batch_id,
                     'arrival_time_ns': int(arrival_time_ns_str),
-                    'request_count': int(request_count_str) # Assuming this is part of the request, not batch size
+                    'request_count': request_count
                 }
                 if batch_id in self.batches:
                      self.batches[batch_id]['requests_in_batch'].append(request_id)
 
-                self.metrics['total_requests'] += 1 # Or use request_count if it means individual sub-requests
-                self.metrics['models'][model_name]['request_count'] += 1
+                # IMPORTANT: We now track requests from REQUEST RECEIVED logs instead of here
+                # to avoid double counting
                 self.pending_requests[batch_id].append(request_id)
                 return
 
@@ -634,9 +646,6 @@ class LogToCsvProcessor:
                 
                 if batch_id not in self.batches:
                     logger.warning(f"BatchProcessed for {batch_id} but no BATCH FORMED info. Assuming it's for pending requests.")
-                    # Try to find requests by batch_id prefix if it's a common pattern
-                    # This part needs careful handling if BATCH FORMED is missed.
-                    # For now, we'll process requests that were put in pending_requests[batch_id]
                 
                 model_name = batch_id.split('_')[0] # Infer model name
                 self.models_seen.add(model_name)
@@ -662,20 +671,24 @@ class LogToCsvProcessor:
                             
                             logger.debug(f"SLO check: {model_name} - time:{processing_time_us:.2f}μs vs threshold:{model_slo_us}μs")
                             
+                            # IMPORTANT: Get the request count for proper accounting
+                            request_count = req_data['request_count']
+                            
                             if processing_time_us > model_slo_us:
                                 # Record violation with correct timestamp for the exact second
-                                self.second_violations[completion_second][model_name] += 1
+                                # Use the actual request count
+                                self.second_violations[completion_second][model_name] += request_count
                                 
-                                # Rest of violation handling
+                                # Rest of violation handling - use request count
                                 slo_status = "Violated"
-                                self.metrics['slo_violated_count'] += 1
-                                self.metrics['models'][model_name]['slo_violated_count'] += 1
+                                self.metrics['slo_violated_count'] += request_count
+                                self.metrics['models'][model_name]['slo_violated_count'] += request_count
                                 
-                                logger.debug(f"SLO Violation at {completion_second} for {model_name}")
+                                logger.debug(f"SLO Violation at {completion_second} for {model_name}, count: {request_count}")
                             else:
                                 slo_status = "Met"
-                                self.metrics['slo_met_count'] += 1
-                                self.metrics['models'][model_name]['slo_met_count'] += 1
+                                self.metrics['slo_met_count'] += request_count
+                                self.metrics['models'][model_name]['slo_met_count'] += request_count
                             
                             self.processed_requests_details.append({
                                 'request_id': req_id,
@@ -686,12 +699,14 @@ class LogToCsvProcessor:
                                 'completion_time_readable': self._format_timestamp_readable(completion_time_ns),
                                 'processing_time_us': processing_time_us, # Convert ns to µs
                                 'status': 'Processed',
-                                'slo_status': slo_status
+                                'slo_status': slo_status,
+                                'request_count': request_count  # Add request_count to details
                             })
                             
-                            self.metrics['processed_requests'] += 1
-                            self.metrics['models'][model_name]['processed_count'] += 1
-                            num_processed_in_this_batch +=1
+                            # IMPORTANT: Update processed_requests with the actual request count
+                            self.metrics['processed_requests'] += request_count
+                            self.metrics['models'][model_name]['processed_count'] += request_count
+                            num_processed_in_this_batch += request_count
                             total_processing_time_us_this_batch += (processing_time_ns) / 1000
                             
                             # Update overall avg processing time (cumulative moving average, in nanoseconds)
