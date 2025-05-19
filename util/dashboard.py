@@ -417,12 +417,18 @@ class CSVDashboard:
             # Round down to nearest second for bucketing
             df['time_bucket'] = df['timestamp'].dt.floor('1s')
             
+            # Log what we're working with before aggregation 
+            logger.info(f"SLO violations raw data points: {len(df)}")
+            
+            # Make sure the violation_count is numeric
+            df['violation_count'] = pd.to_numeric(df['violation_count'], errors='coerce').fillna(0)
+            
             # The data should already be aggregated by timestamp and model from the log processor,
             # but let's double-check to ensure we have only one data point per second per model
             agg_df = df.groupby(['time_bucket', 'model_name'])['violation_count'].sum().reset_index()
             
-            # Log what we're working with
-            logger.info(f"SLO violations data points: {len(agg_df)}")
+            # Log what we're working with after aggregation
+            logger.info(f"SLO violations data points after aggregation: {len(agg_df)}")
             
             # Get unique models
             models = agg_df['model_name'].unique()
@@ -470,7 +476,7 @@ class CSVDashboard:
                         connectgaps=True  # Connect across gaps (zeros)
                     ))
     
-            # Create annotation for latest violations
+            # Create annotation for latest violations with more details
             if len(all_times) > 0:
                 latest_time = all_times[-1]
                 model_stats = []
@@ -488,6 +494,19 @@ class CSVDashboard:
                         xref="paper", yref="paper",
                         x=0.01, y=0.99,
                         text=f"<b>Latest SLO Violations:</b><br>" + "<br>".join(model_stats),
+                        showarrow=False,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="darkgrey",
+                        borderwidth=1,
+                        borderpad=4,
+                        align="left"
+                    )
+                else:
+                    # Add note if no violations in the latest second
+                    fig.add_annotation(
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.99,
+                        text=f"<b>Latest Second:</b><br>No SLO violations",
                         showarrow=False,
                         bgcolor="rgba(255,255,255,0.8)",
                         bordercolor="darkgrey",
