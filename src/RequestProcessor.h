@@ -32,12 +32,13 @@ private:
     std::shared_ptr<InferenceRequest> buffer = nullptr;
     std::array<Slot, (size_t)(RATE_CALCULATION_DURATION+1)> slots;
     std::string model_name;
+    double latency_slo; // in ms
     int _id = 0;
     std::mutex _lock_batch;
     std::shared_ptr<spdlog::logger> _logger;
     
 public:
-    RequestProcessor(std::string model_name): model_name(model_name) {
+    RequestProcessor(std::string model_name, double latency): model_name(model_name), latency_slo(latency) {
         // get logger for request processor
         _logger = Logger::getInstance().getLogger("RequestProcessor");
         if (!_logger) {

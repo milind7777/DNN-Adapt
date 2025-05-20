@@ -107,10 +107,11 @@ int main(int argc, char * argv[]) {
     }
 
     // Initialize the logger
-    if (!Logger::getInstance().initialize("logs", run_name, Logger::Level::INFO, Logger::Level::TRACE)) {
+    if (!Logger::getInstance().initialize("logs", run_name, Logger::Level::TRACE, Logger::Level::TRACE)) {
         std::cerr << "Failed to initialize logging system. Exiting.\n";
         exit(EXIT_FAILURE);
     }
+    std::cout << "Logging system initialized. Log directory: logs\n";
     
     // Get the main logger
     auto logger = Logger::getInstance().getLogger("main");
@@ -119,8 +120,8 @@ int main(int argc, char * argv[]) {
         exit(EXIT_FAILURE);
     }
     
-    LOG_INFO(logger, "DNN-Adapt starting with run_name: {}, model_repo: {}", run_name, model_dir);
-    //logger->flush(); // Force flush after important messages
+    LOG_DEBUG(logger, "DNN-Adapt starting with run_name: {}, model_repo: {}", run_name, model_dir);
+    logger->flush(); // Force flush after important messages
 
     if(!pathExists(model_dir)) {
         LOG_CRITICAL(logger, "Model repo path provided - {}, does not exist!", model_dir);
@@ -151,7 +152,7 @@ int main(int argc, char * argv[]) {
 
     // generate mmap for image bin file
     auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");
-    LOG_INFO(logger, "Mapped bin file: {}, size: {}", (void*)mappedBin.data_ptr, mappedBin.file_size);
+    LOG_DEBUG(logger, "Mapped bin file: {}, size: {}", (void*)mappedBin.data_ptr, mappedBin.file_size);
     //logger->flush();
 
     
@@ -164,32 +165,32 @@ int main(int argc, char * argv[]) {
     gpuList.push_back(gpu2);
 
     // path to profiling folder
-    std::string profilingFolder = "models/profiles/sample";
+    std::string profilingFolder = "models/profiles/system";
 
     // Initialize request processors
-    LOG_INFO(logger, "Initializing request processors");
+    LOG_DEBUG(logger, "Initializing request processors");
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
     for(auto [model_name, _]:models) {
-        request_processors[model_name] = std::make_shared<RequestProcessor>(model_name);
+        request_processors[model_name] = std::make_shared<RequestProcessor>(model_name, latencies[model_name]);
     }
 
     // Initialize executor
-    LOG_INFO(logger, "Initializing executor");
+    LOG_DEBUG(logger, "Initializing executor");
     auto executor = std::make_shared<Executor>(models, gpuList, request_processors, latencies, profilingFolder);
 
     // Start executor
-    LOG_INFO(logger, "Start executor");
+    LOG_DEBUG(logger, "Start executor");
     executor->start();
 
     // start simulator thread
-    LOG_INFO(logger, "Initialize and launch simulator");
+    LOG_DEBUG(logger, "Initialize and launch simulator");
     Simulator sim(request_processors);
     std::thread sim_thread(&Simulator::run, &sim);
     
     // Wait for thread to complete
     sim_thread.join();
 
-    LOG_INFO(logger, "Exiting main program");
+    LOG_DEBUG(logger, "Exiting main program");
     logger->flush();
     
     // Short delay to ensure flush completes

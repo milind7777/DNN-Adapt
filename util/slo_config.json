@@ -1,0 +1,8 @@
+{
+  "model_slos_us": {
+    "resnet18": 5000,
+    "vit16": 7000,
+    "efficientnetb0": 4000
+  },
+  "default_slo_us": 10000
+}

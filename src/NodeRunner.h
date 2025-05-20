@@ -47,6 +47,8 @@ public:
             std::cerr << "Failed to get logger for NodeRunner(). Exiting.\n";
             exit(EXIT_FAILURE);
         }
+
+        //print the log level
         
         _session_options = std::move(session_options);
         _session = Ort::Session(_env, onnx_file_path.c_str(), _session_options);
@@ -63,10 +65,12 @@ public:
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
+        std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
         CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
+        std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
         assert(gpu_ptr != nullptr);
@@ -83,6 +87,7 @@ public:
                                 cudaMemcpyHostToDevice,
                                 _runner_stream
         ));
+        std::cout << "MEM CPY DONE\n";
 
         Ort::MemoryInfo gpu_memory_info = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, _gpu_id, OrtMemTypeDefault);
         std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), CHANNELS, HEIGHT, WIDTH};
@@ -95,7 +100,7 @@ public:
             input_shape.size()
         );
 
-        LOG_INFO(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
+        LOG_DEBUG(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
         try {
             auto output_tensor = _session.Run(
                 Ort::RunOptions{nullptr},
@@ -222,7 +227,7 @@ public:
             if(existingInd != -1) {
                 update_ort_list.push_back(ort_list[existingInd]);
             } else {
-                LOG_INFO(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
+                LOG_DEBUG(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
                 Ort::SessionOptions gpu_session_options;
                 OrtCUDAProviderOptions cuda_options;
                 cuda_options.device_id = gpu_id;
@@ -267,7 +272,7 @@ public:
 
     void start() {
         if(!_running) {
-            LOG_INFO(_logger, "Starting Node for gpu: {}", gpu_id);
+            LOG_DEBUG(_logger, "Starting Node for gpu: {}", gpu_id);
             _runner_thread = std::thread(&NodeRunner::run, this);   
         }
     }
@@ -305,6 +310,7 @@ private:
         auto now = std::chrono::high_resolution_clock::now();
         auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     
+        //data->_logger->info("BATCH PROCESSED: {} @ {}", data->_tag, now_us);
         data->_logger->info("BATCH PROCESSED: {} @ {}", data->_tag, now_us);
         delete data;
     }
@@ -317,7 +323,7 @@ private:
 
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
-                LOG_INFO(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
+                LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
                 std::vector<cudaStream_t> running_streams;
                 auto schedule_start = std::chrono::steady_clock::now();
                 for(int i=0;i<running_node.session_list.size();i++) {
@@ -375,14 +381,14 @@ private:
             // check if update is needded
             if(pendingUpdate) {
                 _update.lock();
-                    LOG_INFO(_logger, "Acquired lock on node to make schedule update");
+                    LOG_DEBUG(_logger, "Acquired lock on node to make schedule update");
                     // update node and ort list
                     running_node = update_node;
                     ort_list = update_ort_list;
 
                     pendingUpdate = false;
                     update_ort_list.clear();
-                    LOG_INFO(_logger, "Releasing lock after update finished, new list size is {}", ort_list.size());
+                    LOG_DEBUG(_logger, "Releasing lock after update finished, new list size is {}", ort_list.size());
                 _update.unlock();
             }
         }

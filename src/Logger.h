@@ -19,7 +19,7 @@ public:
         INFO,
         WARN,
         ERROR,
-        CRITICAL
+        CRITICAL,
     };
     
     static Logger& getInstance();
@@ -29,7 +29,7 @@ public:
     // console_level Minimum log level, file_level Minimum log level for file output
     // Returns true if initialization was successful, false otherwise
     bool initialize(const std::string& log_dir, const std::string& run_name,
-                  Level console_level = Level::INFO, Level file_level = Level::TRACE);
+                  Level console_level = Level::TRACE, Level file_level = Level::TRACE);
     
     // Get a logger instance for a specific component
     // component_name Name of the component

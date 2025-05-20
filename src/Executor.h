@@ -5,6 +5,7 @@
 #include "nexus.h"
 #include "NodeRunner.h"
 #include "Logger.h"
+#include <fstream>
 
 class Executor {
 public:
@@ -22,15 +23,18 @@ public:
             exit(EXIT_FAILURE);
         }
         
+        // Load SLO configuration
+        // load_slo_config("/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json");
+        
         // initialize NodeRunners according to the gpuList
-        LOG_INFO(_logger, "Initialize NodeRunners");
+        LOG_DEBUG(_logger, "Initialize NodeRunners");
         for(int i=0;i<_gpuList.size();i++) {
             auto emptyNode = std::make_shared<Node>();
             _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _requestProcessorList));
         }
 
         // initialize scheduler: currently using nexus
-        LOG_INFO(_logger, "Initialize Scheduler");
+        LOG_DEBUG(_logger, "Initialize Scheduler");
         std::vector<std::string> modelNames;
         for(auto [name, _]: modelsList) modelNames.push_back(name);
         _scheduler = std::make_shared<NexusScheduler>(_gpuList, modelNames, _profilingFolder);
@@ -39,12 +43,12 @@ public:
     void start() {
         // start the loop for continuously checking the request rates and updating the schedule
         if(!_running) {
-            LOG_INFO(_logger, "Launching Nodes");
+            LOG_DEBUG(_logger, "Launching Nodes");
             for(auto runner:_nodeRunnersList) {
                 runner->start();
             }
 
-            LOG_INFO(_logger, "Launching executor run");
+            LOG_DEBUG(_logger, "Launching executor run");
             _runner_thread = std::thread(&Executor::run, this);
         }
     };
@@ -73,12 +77,42 @@ private:
     const int _interval = 5; // in seconds
     std::shared_ptr<spdlog::logger> _logger;
 
+    std::map<std::string, double> _model_slos_us; // SLO thresholds in microseconds
+    double _default_slo_us = 10000.0; // Default SLO threshold
+    
+    // void load_slo_config(const std::string& config_path) {
+    //     try {
+    //         std::ifstream file(config_path);
+    //         if (!file.is_open()) {
+    //             LOG_WARN(_logger, "Could not open SLO config file: {}. Using default SLOs.", config_path);
+    //             return;
+    //         }
+            
+    //         nlohmann::json config;
+    //         file >> config;
+            
+    //         if (config.contains("model_slos_us")) {
+    //             for (auto& [model, slo] : config["model_slos_us"].items()) {
+    //                 _model_slos_us[model] = slo.get<double>();
+    //                 LOG_INFO(_logger, "Loaded SLO for {}: {} μs", model, slo.get<double>());
+    //             }
+    //         }
+            
+    //         if (config.contains("default_slo_us")) {
+    //             _default_slo_us = config["default_slo_us"].get<double>();
+    //             LOG_INFO(_logger, "Loaded default SLO: {} μs", _default_slo_us);
+    //         }
+    //     } catch (std::exception& e) {
+    //         LOG_ERROR(_logger, "Error loading SLO config: {}", e.what());
+    //     }
+    // }
+    
     std::vector<std::shared_ptr<Session>> generate_sessions() {
         std::vector<std::shared_ptr<Session>> sessionList;
         for(auto [model_name, processor]:_requestProcessorList) {
             auto request_rate = processor->get_request_rate();
             sessionList.push_back(std::make_shared<Session>(model_name, _latencies[model_name], request_rate));
-            LOG_INFO(_logger, "got {} requests per second for {}", request_rate, model_name);
+            LOG_DEBUG(_logger, "got {} requests per second for {}", request_rate, model_name);
         }
 
         return sessionList;
@@ -91,7 +125,7 @@ private:
             if(!_running) break;
             
             // get session list by querying request processors
-            LOG_INFO(_logger, "Querying request processors");
+            LOG_DEBUG(_logger, "Querying request processors");
             auto sessionList = generate_sessions();
 
             // generate new shcedule
@@ -104,12 +138,12 @@ private:
                 assert(false);
             }          
 
-            // hack to test parallel execution on gpu streams
+            /* // hack to test parallel execution on gpu streams
             if(nodeList.size() > 0) {
                 for(int i=0;i<nodeList[0]->session_list.size();i++) {
                     nodeList[0]->session_list[i].second.second = 1;
                 }
-            }
+            } */
 
             // update NodeRunners with new schedule
             for(int i=0;i<nodeList.size();i++) {
