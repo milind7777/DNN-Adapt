@@ -1,5 +1,5 @@
 syntax = "proto3";
-package grpc;
+package gpu_scheduler;
 
 message ResetRequest {}
 
