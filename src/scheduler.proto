@@ -1,0 +1,29 @@
+syntax = "proto3";
+package grpc;
+
+message ResetRequest {}
+
+message ResetResponse {
+    repeated float observation = 1;
+}
+
+message ScheduleEntry {
+    int32 model_id = 1;
+    bool in_parallel = 3;
+}
+
+message StepRequest {
+    repeated ScheduleEntry entries = 1;
+    repeated int32 batch_deltas = 2;
+}
+
+message StepResponse {
+    repeated float observation = 1;
+    float reward = 2;
+    bool done = 3;
+}
+
+service SchedulerSim {
+    rpc Reset(ResetRequest) returns (ResetResponse);
+    rpc Step(StepRequest) returns (StepResponse);
+}
