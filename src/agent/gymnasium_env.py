@@ -1,5 +1,5 @@
-import scheduler_pb2
-import scheduler_pb2_grpc
+import agent_scheduler_pb2
+import agent_scheduler_pb2_grpc
 
 import grpc
 import numpy as np
@@ -19,19 +19,19 @@ class InferenceSchedulerEnv(gym.Env):
         self.scheduler_slots = scheduler_slots
 
         self.channel = grpc.insecure_channel(address)
-        self.stub = scheduler_pb2_grpc.SchedulerSimStub(self.channel)
+        self.stub = agent_scheduler_pb2_grpc.SchedulerSimStub(self.channel)
 
         # # OBSERVATION SPACE # # 
         # Observation space and tracking for setup
         # For each model:
         #     ?   1. Request rate - float (normalized)
         #     ?   2. SLO latency in ms - float (normalized)
-        #     ?   3. SLO latency satisfaction % - float (normalized)
+        #     ?   3. SLO latency satisfaction % - array of [float] of size num_gpus (normalized)
         #     ?   4. GPU locations - array of [int] of size num_gpus
         #     ?   5. Batch size - array of [int] of size GPU
 
-        # Model Space Vector Dimension = (3 + 2 * gpus) * (models) = 21
-        self.model_feature_dim = 3 + 2 * self.num_gpus
+        # Model Space Vector Dimension = (2 + 3 * gpus) * (models) = 24
+        self.model_feature_dim = 2 + 3 * self.num_gpus
 
         self.max_request_rate = 200.0
         self.max_slo_latency  = 5000.0
@@ -40,16 +40,15 @@ class InferenceSchedulerEnv(gym.Env):
 
         # For each GPU:
         #     ?   1. Peak memory in MB per schedule - float
-        #     ?   2. SLO satisfaction % per schedule - float
-        #     ?   3. % GPU utilized per schedule - float (Hard to do skipping for now)
+        #     ?   2. % GPU utilized per schedule - float (Hard to do skipping for now)
 
-        # GPU Space Vector Dimension = (2) * (gpus) = 4
-        self.gpu_feature_dim = 2
+        # GPU Space Vector Dimension = (1) * (gpus) = 4
+        self.gpu_feature_dim = 1
 
         self.max_memory_mb = 48 * 1024.0
 
         obs_dim = self.num_models * self.model_feature_dim + self.num_gpus * self.gpu_feature_dim
-        self.obs_space = spaces.Box(low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
         # # Action Space # #
         # 1. Slot-level per gpu
@@ -71,7 +70,8 @@ class InferenceSchedulerEnv(gym.Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
 
-        grpc_req = scheduler_pb2.ResetRequest()
+        grpc_req = agent_scheduler_pb2.ResetRequest()
+        grpc_req.seed = 1
         response = self.stub.Reset(grpc_req)
 
         raw_observation = np.array(response.observation, dtype=np.float32)
@@ -88,10 +88,10 @@ class InferenceSchedulerEnv(gym.Env):
         schedule_entry_actions = action[:schedule_fields]
         batch_delta_actions    = action[schedule_fields:]
 
-        grpc_req = scheduler_pb2.StepRequest()
+        grpc_req = agent_scheduler_pb2.StepRequest()
 
-        for i in range(0, len(schedule_fields), 2):
-            entry = scheduler_pb2.ScheduleEntry()
+        for i in range(0, schedule_fields, 2):
+            entry = agent_scheduler_pb2.ScheduleEntry()
             entry.model_id = action[i]
             entry.in_parallel = action[i+1]
             grpc_req.entries.append(entry)
@@ -102,29 +102,43 @@ class InferenceSchedulerEnv(gym.Env):
         # take the step in the cpp scheduler system
         response = self.stub.Step(grpc_req)
 
-        raw_observation = np.array(reponse.observation, dtype=np.float32)
+        raw_observation = np.array(response.observation, dtype=np.float32)
         observation = self._process_observation(raw_observation)
         reward = response.reward
         terminated = response.done
-        truncated = false
+        truncated = False
         info = {}
 
         return observation, reward, terminated, truncated, info
     
     def _process_observation(self, observation):
-        for i in range(0, self.num_models, self.model_feature_dim):
+        for i in range(0, self.num_models * self.model_feature_dim, self.model_feature_dim):
+            # 1. Request rate - float (normalized)
             observation[i]   = observation[i] / self.max_request_rate
+
+            # 2. SLO latency in ms - float (normalized)
             observation[i+1] = observation[i+1] / self.max_slo_latency
-            observation[i+2] = observation[i+2] / self.max_slo_rate
+
+            # 3. SLO latency satisfaction % - array of [float] of size num_gpus (normalized)
+            offset = 2
+            for j in range(0, self.num_gpus):
+                observation[i+offset+j] = observation[i+offset+j] / self.max_slo_rate
             
-            offset = 3 + self.num_gpus
+            # 4. GPU locations - array of [int] of size num_gpus
+            # No normalization required
+
+            # 5. Batch size - array of [int] of size 
+            offset = 2 + 2 * self.num_gpus
             for j in range(0, self.num_gpus):
                 observation[i+offset+j] = observation[i+offset+j] / self.max_batch_size
 
         offset = self.model_feature_dim * self.num_models
-        for i in range(offset, len(observation), 2):
+        for i in range(offset, len(observation)):
+            # 1. Peak memory in MB per schedule - float
             observation[i]   = observation[i] / self.max_memory_mb
-            observation[i+1] = observation[i+1] / self.max_slo_rate
+
+            # 2. % GPU utilized per schedule - float (Hard to do skipping for now)
+            # This feature is currently skipped
 
         return observation 
 

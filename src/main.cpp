@@ -20,6 +20,7 @@
 #include "Logger.h"
 #include "Executor.h"
 #include "Profiler.h"
+#include "grpc_scheduler.h"
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -174,21 +175,15 @@ int main(int argc, char * argv[]) {
         request_processors[model_name] = std::make_shared<RequestProcessor>(model_name, latencies[model_name]);
     }
 
+    // Initialize simulator
+    auto sim = std::make_shared<Simulator>(request_processors);
+
     // Initialize executor
     LOG_DEBUG(logger, "Initializing executor");
-    auto executor = std::make_shared<Executor>(models, gpuList, request_processors, latencies, profilingFolder);
+    auto executor = std::make_shared<Executor>(models, gpuList, request_processors, sim, latencies, profilingFolder);
 
-    // Start executor
-    LOG_DEBUG(logger, "Start executor");
-    executor->start();
-
-    // start simulator thread
-    LOG_DEBUG(logger, "Initialize and launch simulator");
-    Simulator sim(request_processors);
-    std::thread sim_thread(&Simulator::run, &sim);
-    
-    // Wait for thread to complete
-    sim_thread.join();
+    // Start grpc server
+    RunServer(executor);
 
     LOG_DEBUG(logger, "Exiting main program");
     logger->flush();

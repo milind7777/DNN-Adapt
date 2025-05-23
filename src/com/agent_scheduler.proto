@@ -1,7 +1,9 @@
 syntax = "proto3";
 package gpu_scheduler;
 
-message ResetRequest {}
+message ResetRequest {
+    int32 seed = 1;
+}
 
 message ResetResponse {
     repeated float observation = 1;

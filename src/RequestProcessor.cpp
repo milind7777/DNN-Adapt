@@ -33,12 +33,13 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     auto request_copy = std::make_shared<InferenceRequest>(*req);
     request_copy->arrival_time = std::chrono::duration_cast<std::chrono::microseconds>(
         now.time_since_epoch()
-    ).count();;
+    ).count();
     queue.enqueue(request_copy);
 }
 
-int RequestProcessor::form_batch(int batch_size, int gpu_id) {
+BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     int batch_cur = 0;
+    int stale_req = 0;
     int64_t last_request_arrival_time;
     std::vector<std::pair<int, int64_t>> batch_timing_info;
     
@@ -61,6 +62,7 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
         auto request_slo_time = buffer->arrival_time + (int64_t)(latency_slo * 1000);
         if(est_process_time > request_slo_time) {
             LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, buffer->request_count, time_now);
+            stale_req += buffer->request_count;
             buffer = nullptr;
         } else {
             if(buffer->request_count > batch_size) {
@@ -83,6 +85,7 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
             auto request_slo_time = request->arrival_time + (int64_t)(latency_slo * 1000);
             if(est_process_time >= request_slo_time) {
                 LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, request->request_count, time_now);
+                stale_req += request->request_count;
             } else {
                 last_request_arrival_time = request->arrival_time;
                 batch_timing_info.push_back({std::min(request->request_count, batch_size - batch_cur), request->arrival_time});
@@ -102,12 +105,14 @@ int RequestProcessor::form_batch(int batch_size, int gpu_id) {
     _lock_batch.unlock();
 
     // log the batch timing info
-    LOG_INFO(_logger, "BATCH FORMED: id:{}_{} size: {}", model_name, gpu_id, batch_cur);
-    for(auto entry:batch_timing_info) {
-        LOG_INFO(_logger, "{}_{}: request_count: {}, arrival_time: {}", model_name, gpu_id, entry.first, entry.second);
+    if(batch_cur>0) {
+        LOG_INFO(_logger, "BATCH FORMED: id:{}_{} size: {}", model_name, gpu_id, batch_cur);
+        for(auto entry:batch_timing_info) {
+            LOG_INFO(_logger, "{}_{}: request_count: {}, arrival_time: {}", model_name, gpu_id, entry.first, entry.second);
+        }
     }
     
-    return batch_cur;
+    return BatchInfo(batch_cur, stale_req, batch_timing_info);
 }
 
 // Approximate queue size (thread-safe) - useless now
@@ -134,4 +139,11 @@ double RequestProcessor::get_request_rate() {
 
     // return total request count per second
     return total_count / RATE_CALCULATION_DURATION;
+}
+
+void RequestProcessor::clear_queue() {
+    // reset queue by redeclaring it
+    _lock_batch.lock();
+    queue = moodycamel::ConcurrentQueue<std::shared_ptr<InferenceRequest>>();
+    _lock_batch.unlock();
 }

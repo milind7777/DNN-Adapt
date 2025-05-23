@@ -26,6 +26,14 @@ struct Slot {
     std::atomic<int> counter{0};
 };
 
+struct BatchInfo {
+    int _batch_size;
+    int _stale_req_count;
+    std::vector<std::pair<int, int64_t>> _batch_timing_info;
+    BatchInfo(int batch_size, int stale_req_count, std::vector<std::pair<int, int64_t>> batch_timing_info):
+        _batch_size(batch_size), _stale_req_count(stale_req_count), _batch_timing_info(batch_timing_info) {};
+};
+
 class RequestProcessor {
 private:
     moodycamel::ConcurrentQueue<std::shared_ptr<InferenceRequest>> queue;
@@ -47,9 +55,10 @@ public:
         }
     };
     void register_request(std::shared_ptr<InferenceRequest> req);
-    int form_batch(int batch_size, int gpu_id);
+    BatchInfo form_batch(int batch_size, int gpu_id);
     size_t get_size() const;
     double get_request_rate();
+    void clear_queue();
 };
 
 

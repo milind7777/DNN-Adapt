@@ -19,6 +19,8 @@ class Simulator {
 private:
     std::map<std::string, std::shared_ptr<RequestProcessor>> request_processors;
     std::shared_ptr<spdlog::logger> _logger;
+    std::atomic<bool> stop_flag = false;
+    std::atomic<bool> done_flag = false;
 
     void dynamic_request_rate_generator(std::shared_ptr<RequestProcessor> req_processor, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>> &schedule, std::shared_ptr<InferenceRequest> request);
 
@@ -31,7 +33,15 @@ public:
         }
     };
     
-    void run();
+    void reset() {
+        stop_flag = true;
+    }
+
+    bool isDone() {
+        return done_flag;
+    }
+
+    void run(int seed);
 };
 
 #endif
