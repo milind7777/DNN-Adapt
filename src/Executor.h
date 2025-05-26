@@ -110,7 +110,7 @@ public:
         LOG_DEBUG(_logger, "Fetching slo rates");
         std::vector<std::vector<float>> slo_rate;
         for(auto runner:_nodeRunnersList) {
-            slo_rate.push_back(runner->get_slo_rate(3));
+            slo_rate.push_back(runner->get_slo_rate(3).first);
         }
         
         // 4. GPU locations - array of [int] of size num_gpus - if batch size is zero then model is not present
@@ -154,6 +154,40 @@ public:
 
         observation.insert(observation.end(), peak_mem.begin(), peak_mem.end());
         return observation;
+    }
+
+    float get_reward(int num_schedules) {
+        // Reward = - alpha * slo failure rate
+        //          - beta  * num of GPUs
+        // alpha = 1.0f, beta = 0.1f
+        float alpha = 1.0f;
+        float beta  = 0.1f;
+        
+        LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
+        std::vector<std::pair<std::vector<float>, std::vector<float>>> slo_rate;
+        for(auto runner:_nodeRunnersList) {
+            slo_rate.push_back(runner->get_slo_rate(num_schedules));
+        }
+
+        float total_request_count = 0;
+        float total_fail_count_weighted = 0;
+        for(auto& rates:slo_rate) {
+            auto& per = rates.first;
+            auto& raw = rates.second;
+
+            for(int i=0;i<per.size();i++) {
+                float count = (raw[i] / per[i]) * 100;
+                total_request_count += count;
+                total_fail_count_weighted += per[i] * count;
+            }
+        }
+
+        float slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
+        float gpu_count = 0;
+        for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
+        gpu_count /= _gpuList.size();
+
+        return - alpha * slo_penalty - beta * gpu_count;
     }
 
     void update_schedule(const StepRequest *request) {

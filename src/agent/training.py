@@ -13,7 +13,7 @@ def main():
     model = PPO("MlpPolicy", env, verbose=1, device='cpu', n_steps=2)
 
     # Train the agent
-    model.learn(total_timesteps=2)
+    model.learn(total_timesteps=10)
 
     # save model
     model.save("testing_grpc")

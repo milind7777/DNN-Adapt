@@ -59,7 +59,7 @@ public:
         }
 
         // set reward
-        response->set_reward(2.0);
+        response->set_reward(_executor->get_reward(3));
         
         // check if simulation done
         response->set_done(_executor->isDone());
