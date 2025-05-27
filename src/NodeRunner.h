@@ -166,6 +166,7 @@ public:
 
         // initialize SLO tracking for each model
         for(const auto& [model_name, _]:modelsList) {
+            slo_total_request_count[model_name] = std::vector<float> (slo_track_size, 0.0f);
             slo_failure_rate_percent[model_name] = std::vector<float> (slo_track_size, 0.0f);
             slo_failure_rate_raw[model_name] = std::vector<float> (slo_track_size, 0.0f);
             slo_track_ind[model_name] = 0;
@@ -311,11 +312,41 @@ public:
         }
     }
 
-    std::pair<std::vector<float>, std::vector<float>> get_slo_rate(int num_of_schedules) {
+    std::vector<float> get_slo_failure_persent(int num_of_schedules) {
+        std::vector<float> stats_percent;
+        _lock_stats.lock();
+        for(auto [model_name, rates]:slo_failure_rate_percent) {
+            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
+            float val = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                val += rates[ref_ind];
+            }
+
+            stats_percent.push_back(val/num_of_schedules);
+        }
+
+        _lock_stats.unlock();
+        return stats_percent;
+    }
+
+    std::vector<std::vector<float>> get_slo_rate(int num_of_schedules) {
         std::vector<float> stats_percent;
         std::vector<float> stats_raw;
+        std::vector<float> total;
 
         _lock_stats.lock();
+        for(auto [model_name, rates]:slo_total_request_count) {
+            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
+            float val = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                val += rates[ref_ind];
+            }
+
+            stats_percent.push_back(val/num_of_schedules);
+        }
+
         for(auto [model_name, rates]:slo_failure_rate_percent) {
             auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
             float val = 0;
@@ -398,6 +429,7 @@ private:
     std::map<std::string, std::string> modelsList;
     std::map<std::string, std::vector<float>> slo_failure_rate_raw;
     std::map<std::string, std::vector<float>> slo_failure_rate_percent;
+    std::map<std::string, std::vector<float>> slo_total_request_count;
     std::map<std::string, std::vector<float>> inference_latency;
     std::map<std::string, int> slo_track_ind;
     std::map<std::string, int> inference_latency_ind;
@@ -461,6 +493,7 @@ private:
                 }
                 
                 slo_failure_rate_raw[model_name][slo_track_ind[model_name]] = fail_count;
+                slo_total_request_count[model_name][slo_track_ind[model_name]] = success_count + fail_count;
                 slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = (fail_count / (success_count + fail_count)) * 100;
                 slo_track_ind[model_name] = (slo_track_ind[model_name] + 1) % slo_track_size;
 

@@ -110,7 +110,7 @@ public:
         LOG_DEBUG(_logger, "Fetching slo rates");
         std::vector<std::vector<float>> slo_rate;
         for(auto runner:_nodeRunnersList) {
-            slo_rate.push_back(runner->get_slo_rate(3).first);
+            slo_rate.push_back(runner->get_slo_failure_persent(3));
         }
         
         // 4. GPU locations - array of [int] of size num_gpus - if batch size is zero then model is not present
@@ -164,7 +164,7 @@ public:
         float beta  = 0.1f;
         
         LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
-        std::vector<std::pair<std::vector<float>, std::vector<float>>> slo_rate;
+        std::vector<std::vector<std::vector<float>>> slo_rate;
         for(auto runner:_nodeRunnersList) {
             slo_rate.push_back(runner->get_slo_rate(num_schedules));
         }
@@ -172,11 +172,12 @@ public:
         float total_request_count = 0;
         float total_fail_count_weighted = 0;
         for(auto& rates:slo_rate) {
-            auto& per = rates.first;
-            auto& raw = rates.second;
+            auto& per = rates[0];
+            auto& raw = rates[1];
+            auto& total = rates[2];
 
             for(int i=0;i<per.size();i++) {
-                float count = (raw[i] / per[i]) * 100;
+                float count = total[i];
                 total_request_count += count;
                 total_fail_count_weighted += per[i] * count;
             }
