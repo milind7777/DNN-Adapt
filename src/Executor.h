@@ -183,7 +183,8 @@ public:
             }
         }
 
-        float slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
+        float slo_penalty = 0;
+        if(total_request_count > 0) slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
         float gpu_count = 0;
         for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
         gpu_count /= _gpuList.size();
