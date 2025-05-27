@@ -494,7 +494,8 @@ private:
                 
                 slo_failure_rate_raw[model_name][slo_track_ind[model_name]] = fail_count;
                 slo_total_request_count[model_name][slo_track_ind[model_name]] = success_count + fail_count;
-                slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = (fail_count / (success_count + fail_count)) * 100;
+                slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = 0;
+                if((success_count + fail_count) > 0) slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = (fail_count / (success_count + fail_count)) * 100;
                 slo_track_ind[model_name] = (slo_track_ind[model_name] + 1) % slo_track_size;
 
                 // process inference latency
