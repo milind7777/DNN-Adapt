@@ -159,9 +159,12 @@ public:
     float get_reward(int num_schedules) {
         // Reward = - alpha * slo failure rate
         //          - beta  * num of GPUs
-        // alpha = 1.0f, beta = 0.1f
+        //          - gamma * batch fill rate
+        //
+        // alpha = 1.0f, beta = 0.5f, // gamma = 0.5f
         float alpha = 1.0f;
-        float beta  = 0.1f;
+        float beta  = 0.5f;
+        float gamma = 0.5f;
         
         LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
         std::vector<std::vector<std::vector<float>>> slo_rate;
@@ -185,11 +188,17 @@ public:
 
         float slo_penalty = 0;
         if(total_request_count > 0) slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
+        
         float gpu_count = 0;
         for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
         gpu_count /= _gpuList.size();
 
-        return - alpha * slo_penalty - beta * gpu_count;
+        float batch_fill_penalty = 0;
+        for(auto runner:_nodeRunnersList) {
+            batch_fill_penalty += runner->get_batch_fill_rate(3);
+        } batch_fill_penalty /= _nodeRunnersList.size();
+
+        return - alpha * slo_penalty - beta * gpu_count - gamma * batch_fill_penalty;
     }
 
     void update_schedule(const StepRequest *request) {

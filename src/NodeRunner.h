@@ -19,6 +19,7 @@ extern const int CHANNELS;
 extern const int HEIGHT;
 extern const int WIDTH;
 extern MappedBin gMappedImageBin;
+extern const int SLOTS_PER_GPU;
 
 #define CUDACHECK(err) do { cuda_check((err), __FILE__, __LINE__); } while(false)
 inline void cuda_check(cudaError_t error_code, const char *file, int line)
@@ -49,8 +50,6 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        //print the log level
-        
         _session_options = std::move(session_options);
         _session = Ort::Session(_env, onnx_file_path.c_str(), _session_options);
     }
@@ -180,6 +179,10 @@ public:
             batch_for_model[model_name] = 0;
             batch_for_model_update[model_name] = 0;
         }
+
+        // initialize batch fill rate tracking for each model
+        batch_fill_rate = std::vector<std::vector<float>> (SLOTS_PER_GPU, std::vector<float> (batch_fill_rate_track_size, 0.0f));
+        batch_fill_track_ind = std::vector<int> (batch_fill_rate_track_size, 0);
 
         // initialize ORTRunners for each session in node schedule
         cudaSetDevice(gpu_id);
@@ -330,6 +333,25 @@ public:
         return stats_percent;
     }
 
+    float get_batch_fill_rate(int num_of_schedules) {
+        // std::vector<float> stats_rate;
+        float fill_rate = 0;
+        _lock_stats.lock();
+        for(int i=0;i<batch_fill_rate.size();i++) {
+            auto ind = (batch_fill_track_ind[i] - 1 + batch_fill_rate_track_size) % batch_fill_rate_track_size;
+            float val = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                val += batch_fill_rate[i][ref_ind];
+            }
+
+            fill_rate += val/num_of_schedules;
+        } fill_rate /= SLOTS_PER_GPU;
+
+        _lock_stats.unlock();
+        return fill_rate;
+    }
+
     std::vector<std::vector<float>> get_slo_rate(int num_of_schedules) {
         std::vector<float> stats_percent;
         std::vector<float> stats_raw;
@@ -432,9 +454,12 @@ private:
     std::map<std::string, std::vector<float>> slo_total_request_count;
     std::map<std::string, std::vector<float>> inference_latency;
     std::map<std::string, int> slo_track_ind;
+    std::vector<std::vector<float>> batch_fill_rate;
+    std::vector<int> batch_fill_track_ind;
     std::map<std::string, int> inference_latency_ind;
     int inference_latency_size = 10;
     int slo_track_size = 10;
+    int batch_fill_rate_track_size = 10;
     std::mutex _lock_stats;
     std::map<std::string, double> latencies;
     std::map<std::string, int> batch_for_model_update;
@@ -547,7 +572,13 @@ private:
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
                 // LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
+                
+                // keep track of active streams to enable parallel execution
                 std::vector<cudaStream_t> running_streams;
+                
+                // track batch fill rate per slot
+                int slot_num = 0;
+                
                 auto schedule_start = std::chrono::steady_clock::now();
                 for(int i=0;i<running_node.session_list.size();i++) {
                     auto session_ptr = running_node.session_list[i].first;
@@ -562,7 +593,7 @@ private:
 
                         running_streams.clear();
                     }
-
+                    
                     auto now = std::chrono::high_resolution_clock::now();
                     int64_t inference_start_time = std::chrono::duration_cast<std::chrono::microseconds>(
                         now.time_since_epoch()
@@ -571,6 +602,11 @@ private:
                     // get batch from request processor
                     auto batch_info = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size, gpu_id);
                     auto batch_current = batch_info._batch_size;
+                    
+                    // update batch fill rate
+                    batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = 100.0;
+                    if(session_ptr->batch_size > 0) batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = (batch_current / session_ptr->batch_size) * 100.0;
+                    batch_fill_track_ind[slot_num] = (batch_fill_track_ind[slot_num] + 1) % batch_fill_rate_track_size;
 
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
@@ -587,7 +623,7 @@ private:
                         );
 
                         running_streams.push_back(ort_ptr->_runner_stream);
-                    }
+                    } slot_num++ ;
                 } if (running_streams.size()) {
                     // wait for all running streams to complete
                     for(auto stream:running_streams) {

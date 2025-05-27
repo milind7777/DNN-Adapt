@@ -22,6 +22,8 @@
 #include "Profiler.h"
 #include "grpc_scheduler.h"
 
+const int SLOTS_PER_GPU = 3;
+
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
 }
