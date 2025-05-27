@@ -333,7 +333,7 @@ public:
     std::vector<std::vector<float>> get_slo_rate(int num_of_schedules) {
         std::vector<float> stats_percent;
         std::vector<float> stats_raw;
-        std::vector<float> total;
+        std::vector<float> stats_total;
 
         _lock_stats.lock();
         for(auto [model_name, rates]:slo_total_request_count) {
@@ -344,7 +344,7 @@ public:
                 val += rates[ref_ind];
             }
 
-            stats_percent.push_back(val/num_of_schedules);
+            stats_total.push_back(val/num_of_schedules);
         }
 
         for(auto [model_name, rates]:slo_failure_rate_percent) {
@@ -370,7 +370,7 @@ public:
         }
 
         _lock_stats.unlock();
-        return {stats_percent, stats_raw};
+        return {stats_percent, stats_raw, stats_total};
     }
 
     std::vector<float> get_inference_latency(int num_of_schedules) {
