@@ -102,8 +102,12 @@ public:
 
         LOG_DEBUG(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
         try {
+            // 3. configure the arena to shrink on every Run()
+            std::string gpu = "gpu:" + std::to_string(_gpu_id);
+            Ort::RunOptions run_option;
+            run_option.AddConfigEntry("memory.enable_memory_arena_shrinkage", gpu.c_str());
             auto output_tensor = _session.Run(
-                Ort::RunOptions{nullptr},
+                run_option,
                 _input_names.data(),
                 &_input_tensor,
                 1,
@@ -201,6 +205,28 @@ public:
             }
             cuda_options.has_user_compute_stream = 1;
             cuda_options.user_compute_stream = static_cast<void*> (ort_stream);
+
+            // fix to deallocate memory chunks from onnxruntime "arena" after each inference run
+            // https://github.com/microsoft/onnxruntime/issues/9509#issuecomment-951546580
+
+            // 1. Not allocate weights memory through the arena
+            gpu_session_options.AddConfigEntry("session.use_device_allocator_for_initializers", "1");
+            
+            // 2. Configure the arena to have high enough initial chunk to support most Run() calls - setting to 500MB
+            const char* keys[] = {"max_mem", "arena_extend_strategy", "initial_chunk_size_bytes", "max_dead_bytes_per_chunk", "initial_growth_chunk_size_bytes"};
+            const size_t values[] = {0 /*let ort pick default max memory*/, 0, 1024, 0, 256};
+
+            OrtArenaCfg* arena_cfg = nullptr;
+            const auto& api = Ort::GetApi();
+            api.CreateArenaCfgV2(keys, values, 5, &arena_cfg) == nullptr;
+            std::unique_ptr<OrtArenaCfg, decltype(api.ReleaseArenaCfg)> rel_arena_cfg(arena_cfg, api.ReleaseArenaCfg);
+
+            cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearch::OrtCudnnConvAlgoSearchExhaustive;
+            cuda_options.gpu_mem_limit = std::numeric_limits<size_t>::max();
+            cuda_options.arena_extend_strategy = 0;
+            cuda_options.do_copy_in_default_stream = false;
+            cuda_options.default_memory_arena_cfg = arena_cfg;
+
             gpu_session_options.AppendExecutionProvider_CUDA(cuda_options);
 
             const std::string onnx_file_path = "models/" + session_ptr->model_name + ".onnx";

@@ -41,7 +41,7 @@ class SchedulerEpisodeCallback(BaseCallback):
         #terminated = self.locals['']
         done = bool(self.locals['dones'][0])
         # If done, finalize the current episode
-        print("Done:", done)
+        # print("Done:", done)
         
         # Check for NaN values
         if np.isnan(reward):
@@ -82,7 +82,7 @@ class SchedulerEpisodeCallback(BaseCallback):
         self.current_episode['rewards'].append(reward)
         
         if done:
-            print("In done")
+            print("Is done")
             print(f"Episode {self.episode_count} terminated after {len(self.current_episode['steps'])} steps")
             self._process_completed_episode()
         return True
@@ -281,13 +281,13 @@ def main():
         f.write(f"SCHEDULER TRAINING LOG - {datetime.now().isoformat()}\n")
     
     checkpoint_callback = CheckpointCallback(
-        save_freq=1800,                     # Save every 1000 environment steps
+        save_freq=1800/8,                     # Save every 1000 environment steps
         save_path="./checkpoints/",         # Directory to save checkpoints
         name_prefix="ppo_scheduler_model"   # Prefix for checkpoint files
     )
 
     print("Starting training...")
-    model.learn(total_timesteps=14400, callback=[callback, checkpoint_callback])
+    model.learn(total_timesteps=14400/8, callback=[callback, checkpoint_callback])
 
     # Print final statistics
     print("\n" + "="*60)
