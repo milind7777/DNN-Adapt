@@ -191,10 +191,12 @@ public:
         float gpu_count = 0;
         for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
         gpu_count /= _gpuList.size();
+        
         float batch_fill_penalty = 0;
         for(auto runner:_nodeRunnersList) {
             batch_fill_penalty += runner->get_batch_fill_rate(3);
-        } batch_fill_penalty /= _nodeRunnersList.size();
+        } batch_fill_penalty /= (_nodeRunnersList.size() * 100.0);
+
         return - alpha * slo_penalty - beta * gpu_count - gamma * batch_fill_penalty;
     }
 

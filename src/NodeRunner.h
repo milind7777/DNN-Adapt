@@ -603,7 +603,7 @@ private:
                     auto batch_current = batch_info._batch_size;
                     
                     // update batch fill rate
-                    batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = 100.0;
+                    batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = 0;
                     if(session_ptr->batch_size > 0) batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = (batch_current / session_ptr->batch_size) * 100.0;
                     batch_fill_track_ind[slot_num] = (batch_fill_track_ind[slot_num] + 1) % batch_fill_rate_track_size;
 
