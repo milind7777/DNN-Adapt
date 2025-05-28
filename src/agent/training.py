@@ -6,7 +6,7 @@ from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import BaseCallback
 from gymnasium.wrappers import RecordEpisodeStatistics
 from gymnasium_env import InferenceSchedulerEnv
-
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 class SchedulerEpisodeCallback(BaseCallback):
     def __init__(self, num_gpus=2, num_models=3, scheduler_slots=3, 
@@ -259,7 +259,7 @@ def main():
         env, 
         verbose=1, 
         device='cpu', 
-        n_steps=10, 
+        n_steps=60, 
         #batch_size=5,
         tensorboard_log="./tb_logs"
     )
@@ -280,8 +280,14 @@ def main():
     with open("scheduler_pretty.log", 'w') as f:
         f.write(f"SCHEDULER TRAINING LOG - {datetime.now().isoformat()}\n")
     
+    checkpoint_callback = CheckpointCallback(
+        save_freq=1800,                     # Save every 1000 environment steps
+        save_path="./checkpoints/",         # Directory to save checkpoints
+        name_prefix="ppo_scheduler_model"   # Prefix for checkpoint files
+    )
+
     print("Starting training...")
-    model.learn(total_timesteps=3000, callback=callback)
+    model.learn(total_timesteps=14400, callback=[callback, checkpoint_callback])
 
     # Print final statistics
     print("\n" + "="*60)

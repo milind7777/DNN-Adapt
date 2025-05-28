@@ -104,7 +104,6 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
     }
 }
 
-std::srand(7);
 void Simulator::run(int seed) {
     /*
         Avaialble model list:

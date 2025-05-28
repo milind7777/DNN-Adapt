@@ -31,6 +31,8 @@ public:
             std::cerr << "Failed to get logger. Exiting.\n";
             exit(EXIT_FAILURE);
         }
+
+        std::srand(7);
     };
     
     void reset() {
