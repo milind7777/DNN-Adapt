@@ -1,6 +1,7 @@
 #include "Simulator.h"
 #include <iostream>
 #include <cmath>
+#include <random>
 
 // The second level granularity for the request rate simulator
 double QUANTIZATION_INTERVAL = 0.5;
@@ -103,6 +104,7 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
     }
 }
 
+std::srand(7);
 void Simulator::run(int seed) {
     /*
         Avaialble model list:
@@ -112,26 +114,32 @@ void Simulator::run(int seed) {
     */
 
     std::map<std::string, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>>> schedules;
-
-    // schedules["efficientnetb0"] = {
-    //     {rate_type::ramp, {5, {10}}},
-    //     {rate_type::flat, {20, {50}}},
-    //     {rate_type::ramp, {5, {-10}}}
-    // };
+    
+    schedules["efficientnetb0"] = {
+        {rate_type::flat, {5, {0}}},
+        {rate_type::flat, {115, {1}}}
+        // {rate_type::ramp, {5, {-10}}}
+    };
 
     schedules["resnet18"] = {
-        {rate_type::flat, {10, {0}}},
-        {rate_type::flat, {10, {2}}}
+        {rate_type::flat, {5, {0}}},
+        {rate_type::flat, {115, {1}}}
         // {rate_type::flat, {40, {10}}},
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     schedules["vit16"] = {
-        {rate_type::flat, {10, {0}}},
-        {rate_type::flat, {10, {2}}}
+        {rate_type::flat, {5, {0}}},
+        {rate_type::flat, {115, {1}}}
         // {rate_type::flat, {30, {10}}},
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
+
+    int min = 0;
+    int max = 50;
+    schedules["efficientnetb0"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    schedules["resnet18"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    schedules["vit16"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
 
     // reset flags
     stop_flag = false;
