@@ -30,7 +30,7 @@ class SchedulerEpisodeCallback(BaseCallback):
         self.episode_count = 0
         
         # Model names for pretty printing
-        self.model_names = ["resnet18", "vit16", "efficientnetb0"]
+        self.model_names = ["efficientnetb0" ,"resnet18", "vit16"]
         self.model_feature_dim = 2 + 3 * self.num_gpus  # 2 + 3 * num_gpus
         
     def _on_step(self) -> bool:
@@ -38,6 +38,10 @@ class SchedulerEpisodeCallback(BaseCallback):
         action = self.locals['actions'][0]
         obs = self.locals['obs_tensor'][0].cpu().numpy()
         reward = float(self.locals['rewards'][0])
+        #terminated = self.locals['']
+        done = bool(self.locals['dones'][0])
+        # If done, finalize the current episode
+        print("Done:", done)
         
         # Check for NaN values
         if np.isnan(reward):
@@ -77,7 +81,56 @@ class SchedulerEpisodeCallback(BaseCallback):
         self.current_episode['observations'].append(obs.tolist())
         self.current_episode['rewards'].append(reward)
         
+        if done:
+            print("In done")
+            print(f"Episode {self.episode_count} terminated after {len(self.current_episode['steps'])} steps")
+            self._process_completed_episode()
         return True
+
+    # ADD THIS ENTIRE METHOD after _on_step and before _create_pretty_schedule
+    def _process_completed_episode(self):
+        """Process completed episode immediately when done=True"""
+        if len(self.current_episode['steps']) > 0:
+            rewards = self.current_episode['rewards']
+            valid_rewards = [r for r in rewards if not np.isnan(r)]
+            
+            episode_summary = {
+                'episode': self.episode_count,
+                'timestamp': datetime.now().isoformat(),
+                'total_reward': sum(valid_rewards),
+                'episode_length': len(self.current_episode['steps']),
+                'reward_stats': {
+                    'mean': float(np.mean(valid_rewards)) if valid_rewards else 0.0,
+                    'std': float(np.std(valid_rewards)) if len(valid_rewards) > 1 else 0.0,
+                    'min': float(np.min(valid_rewards)) if valid_rewards else 0.0,
+                    'max': float(np.max(valid_rewards)) if valid_rewards else 0.0
+                },
+                'schedule_diversity': self._calculate_schedule_diversity(),
+                'nan_reward_count': len(rewards) - len(valid_rewards),
+                'steps': self.current_episode['steps']
+            }
+            
+            self.episode_data.append(episode_summary)
+            
+            # Save after each episode
+            with open(self.log_file, 'w') as f:
+                json.dump(self.episode_data, f, indent=2)
+            
+            self._write_pretty_log(episode_summary)
+            
+            if self.verbose >= 1:
+                print(f"Episode {self.episode_count} COMPLETED: "
+                    f"Reward={episode_summary['total_reward']:.3f}, "
+                    f"Length={episode_summary['episode_length']}, "
+                    f"Avg Reward={episode_summary['reward_stats']['mean']:.3f}")
+            
+            # Reset for next episode
+            self.current_episode = {
+                'steps': [], 'schedule_actions': [], 'batch_actions': [], 
+                'observations': [], 'rewards': []
+            }
+            self.episode_count += 1
+
 
     def _create_pretty_schedule(self, schedule_action, batch_action, observation):
         """Create a pretty-printed schedule similar to C++ Node::pretty_print()"""
@@ -170,44 +223,9 @@ class SchedulerEpisodeCallback(BaseCallback):
 
     def _on_rollout_end(self) -> None:
         if len(self.current_episode['steps']) > 0:
-            rewards = self.current_episode['rewards']
-            valid_rewards = [r for r in rewards if not np.isnan(r)]
-            
-            episode_summary = {
-                'episode': self.episode_count,
-                'timestamp': datetime.now().isoformat(),
-                'total_reward': sum(valid_rewards),
-                'episode_length': len(self.current_episode['steps']),
-                'reward_stats': {
-                    'mean': float(np.mean(valid_rewards)) if valid_rewards else 0.0,
-                    'std': float(np.std(valid_rewards)) if len(valid_rewards) > 1 else 0.0,
-                    'min': float(np.min(valid_rewards)) if valid_rewards else 0.0,
-                    'max': float(np.max(valid_rewards)) if valid_rewards else 0.0
-                },
-                'schedule_diversity': self._calculate_schedule_diversity(),
-                'nan_reward_count': len(rewards) - len(valid_rewards),
-                'steps': self.current_episode['steps']
-            }
-            
-            self.episode_data.append(episode_summary)
-            
-            with open(self.log_file, 'w') as f:
-                json.dump(self.episode_data, f, indent=2)
-            
-            self._write_pretty_log(episode_summary)
-            
-            if self.verbose >= 1:
-                print(f"Episode {self.episode_count}: "
-                      f"Reward={episode_summary['total_reward']:.3f}, "
-                      f"Length={episode_summary['episode_length']}, "
-                      f"Avg Reward={episode_summary['reward_stats']['mean']:.3f}")
-            
-            self.current_episode = {
-                'steps': [], 'schedule_actions': [], 'batch_actions': [], 
-                'observations': [], 'rewards': []
-            }
-            self.episode_count += 1
-    
+            print(f"Processing incomplete episode with {len(self.current_episode['steps'])} steps at rollout end")
+            self._process_completed_episode()
+        
     def _calculate_schedule_diversity(self):
         if not self.current_episode['schedule_actions']:
             return 0.0
@@ -241,8 +259,8 @@ def main():
         env, 
         verbose=1, 
         device='cpu', 
-        n_steps=5, 
-        batch_size=5,
+        n_steps=10, 
+        #batch_size=5,
         tensorboard_log="./tb_logs"
     )
 
@@ -258,12 +276,12 @@ def main():
         verbose=1
     )    
     
-    # Clear pretty log file at start
+    # Clear pretty log file at starts
     with open("scheduler_pretty.log", 'w') as f:
         f.write(f"SCHEDULER TRAINING LOG - {datetime.now().isoformat()}\n")
     
     print("Starting training...")
-    model.learn(total_timesteps=25, callback=callback)
+    model.learn(total_timesteps=3000, callback=callback)
 
     # Print final statistics
     print("\n" + "="*60)
@@ -271,10 +289,10 @@ def main():
     print("="*60)
     
     if hasattr(env, 'episode_returns') and len(env.return_queue) > 0:
-        print(f"Episodes completed: {len(env.episode_returns)}")
-        print(f"Average episode return: {np.mean(env.episode_returns):.3f}")
-        print(f"Best episode return: {np.max(env.episode_returns):.3f}")
-        print(f"Average episode length: {np.mean(env.episode_lengths):.1f}")
+        print(f"Episodes completed: {len(env.return_queue)}")
+        print(f"Average episode return: {np.mean(env.return_queue):.3f}")
+        print(f"Best episode return: {np.max(env.return_queue):.3f}")
+        print(f"Average episode length: {np.mean(env.return_queue):.1f}")
 
     model.save("testing_grpc")
     env.unwrapped.grpc_close()

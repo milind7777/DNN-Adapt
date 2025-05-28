@@ -13,8 +13,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 #  Configuration 
-LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN-Adapt/logs/experiment/dnn_adapt.log'
-CSV_OUTPUT_DIR = '/home/cching1/DNNAdapt/DNN-Adapt/util/csv_data_cache' # Ensure this directory exists
+LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN_ADAPT_I/logs/experiment/dnn_adapt.log'
+CSV_OUTPUT_DIR = '//home/cching1/DNNAdapt/DNN_ADAPT_I/util/csv_data_cache' # Ensure this directory exists
 MAX_HISTORY_CSV_ROWS = 5000 # For history CSVs to prevent them from growing indefinitely
 RECENT_REQUESTS_LIMIT = 200 # For recent_requests_details.csv
 
@@ -89,7 +89,7 @@ class LogToCsvProcessor:
         self.re_batch_processed = re.compile(r'\[CudaCallback\] \[info\] BATCH PROCESSED: (.+?) @ (\d+)')
         self.re_simulate_rate = re.compile(r'\[Simulator\] \[trace\] Simulating rate: (\d+) for model (.+)')
         # Add new regex to match SLO violation warnings 
-        self.re_slo_violation = re.compile(r'\[RequestProcessor\] \[warning\] SLO VIOLATED: model_name:(.+?) reqeust_count:(\d+) time_now:(\d+)')
+        self.re_slo_violation = re.compile(r'\[RequestProcessor\] \[warning\] SLO VIOLATED: model_name:(.+?) request_count:(\d+) time_now:(\d+)')
         # Add regex to match new REQUEST RECEIVED logs
         self.re_request_received = re.compile(r'\[RequestProcessor\] \[info\] REQUEST RECEIVED: model_name:(.+?) request_count:(\d+) time_now:(\d+)')
         
