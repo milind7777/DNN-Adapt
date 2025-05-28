@@ -23,6 +23,7 @@
 #include "grpc_scheduler.h"
 
 const int SLOTS_PER_GPU = 3;
+int SIMULATION_LEN = 120; // in seconds
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);

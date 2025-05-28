@@ -90,6 +90,14 @@ public:
         }
     }
 
+    void stopSimulation() {
+        _simulator->reset();
+        if(_simulation_thread.joinable()) {
+            LOG_DEBUG(_logger, "Calling join on simulator thread");
+            _simulation_thread.join();
+        }
+    }
+
     std::vector<float> get_observation() {
         LOG_DEBUG(_logger, "Received observation request on Executor");
         // For each model

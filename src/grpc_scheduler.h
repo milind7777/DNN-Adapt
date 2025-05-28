@@ -16,8 +16,11 @@ using gpu_scheduler::StepRequest;
 using gpu_scheduler::StepResponse;
 using gpu_scheduler::ScheduleEntry;
 
+extern int SIMULATION_LEN;
+
 class SchedulerSimServiceImpl final : public SchedulerSim::Service {
 public:
+    int step_count = 0;
     explicit SchedulerSimServiceImpl(std::shared_ptr<Executor> executor): _executor(executor) {
         // get logger for grpc service
         _logger = Logger::getInstance().getLogger("grpcpp_service");
@@ -61,8 +64,18 @@ public:
         // set reward
         response->set_reward(_executor->get_reward(3));
         
+        // update step count
+        step_count++;
+        bool is_done = false;
+        if(step_count == SIMULATION_LEN) {
+            // reset simulator
+            _executor->stopSimulation();
+            is_done = true;
+            step_count = 0;
+        }
+
         // check if simulation done
-        response->set_done(_executor->isDone());
+        response->set_done(is_done);
 
         LOG_DEBUG(_logger, "Serviced STEP request from python client");
         _logger->flush();

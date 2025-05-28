@@ -221,10 +221,10 @@ class SchedulerEpisodeCallback(BaseCallback):
                 f.write(step['pretty_schedule'])
                 f.write(f"\n{'-'*40}\n\n")
 
-    def _on_rollout_end(self) -> None:
-        if len(self.current_episode['steps']) > 0:
-            print(f"Processing incomplete episode with {len(self.current_episode['steps'])} steps at rollout end")
-            self._process_completed_episode()
+    # def _on_rollout_end(self) -> None:
+    #     if len(self.current_episode['steps']) > 0:
+    #         print(f"Processing incomplete episode with {len(self.current_episode['steps'])} steps at rollout end")
+    #         self._process_completed_episode()
         
     def _calculate_schedule_diversity(self):
         if not self.current_episode['schedule_actions']:
@@ -281,13 +281,13 @@ def main():
         f.write(f"SCHEDULER TRAINING LOG - {datetime.now().isoformat()}\n")
     
     checkpoint_callback = CheckpointCallback(
-        save_freq=1800/8,                     # Save every 1000 environment steps
+        save_freq=1800,                     # Save every 1000 environment steps
         save_path="./checkpoints/",         # Directory to save checkpoints
         name_prefix="ppo_scheduler_model"   # Prefix for checkpoint files
     )
 
     print("Starting training...")
-    model.learn(total_timesteps=14400/8, callback=[callback, checkpoint_callback])
+    model.learn(total_timesteps=14400, callback=[callback, checkpoint_callback])
 
     # Print final statistics
     print("\n" + "="*60)
