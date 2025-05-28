@@ -173,28 +173,49 @@ public:
         float alpha = 1.0f;
         float beta  = 0.5f;
         float gamma = 0.5f;
-        LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
-        std::vector<std::vector<std::vector<float>>> slo_rate;
+
+        int m = _modelsList.size();
+        std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
         for(auto runner:_nodeRunnersList) {
-            slo_rate.push_back(runner->get_slo_rate(num_schedules));
-        }
-
-        float total_request_count = 0;
-        float total_fail_count_weighted = 0;
-        for(auto& rates:slo_rate) {
-            auto& per = rates[0];
-            auto& raw = rates[1];
-            auto& total = rates[2];
-
-            for(int i=0;i<per.size();i++) {
-                float count = total[i];
-                total_request_count += count;
-                total_fail_count_weighted += per[i] * count;
+            auto count = runner->get_slo_total(3);
+            for(int i=0;i<count.size();i++) {
+                slo_total[i].first += count[i].first;
+                slo_total[i].second += count[i].second;
             }
         }
 
+        float slo_fail_total = 0;
+        float slo_success_total = 0;
+        for(int i=0;i<m;i++) {
+            slo_fail_total += slo_total[i].first;
+            slo_success_total += slo_total[i].second;
+        } 
+
         float slo_penalty = 0;
-        if(total_request_count > 0) slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
+        if((slo_fail_total + slo_success_total) > 0) slo_penalty = slo_fail_total / (slo_fail_total + slo_success_total);
+
+        // LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
+        // std::vector<std::vector<std::vector<float>>> slo_rate;
+        // for(auto runner:_nodeRunnersList) {
+        //     slo_rate.push_back(runner->get_slo_rate(num_schedules));
+        // }
+
+        // float total_request_count = 0;
+        // float total_fail_count_weighted = 0;
+        // for(auto& rates:slo_rate) {
+        //     auto& per = rates[0];
+        //     auto& raw = rates[1];
+        //     auto& total = rates[2];
+
+        //     for(int i=0;i<per.size();i++) {
+        //         float count = total[i];
+        //         total_request_count += count;
+        //         total_fail_count_weighted += per[i] * count;
+        //     }
+        // }
+
+        // float slo_penalty = 0;
+        // if(total_request_count > 0) slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
         
         float gpu_count = 0;
         for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();

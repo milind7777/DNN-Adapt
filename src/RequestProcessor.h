@@ -59,6 +59,7 @@ public:
     size_t get_size() const;
     double get_request_rate();
     void clear_queue();
+    float discardStale();
 };
 
 

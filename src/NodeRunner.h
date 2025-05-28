@@ -171,13 +171,11 @@ public:
 
         // initialize SLO tracking for each model
         for(const auto& [model_name, _]:modelsList) {
-            slo_total_request_count[model_name] = std::vector<float> (slo_track_size, 0.0f);
-            slo_failure_rate_percent[model_name] = std::vector<float> (slo_track_size, 0.0f);
-            slo_failure_rate_raw[model_name] = std::vector<float> (slo_track_size, 0.0f);
-            slo_track_ind[model_name] = 0;
-
             inference_latency[model_name] = std::vector<float> (inference_latency_size, -1.0);
             inference_latency_ind[model_name] = 0;
+
+            slo_total_per_model[model_name] = std::vector<std::pair<float, float>> (slo_total_size, {0.0f, 0.0f});
+            slo_total_ind[model_name] = 0;
         }
 
         // initialize batch size tracking for each model
@@ -346,19 +344,42 @@ public:
     std::vector<float> get_slo_failure_persent(int num_of_schedules) {
         std::vector<float> stats_percent;
         _lock_stats.lock();
-        for(auto [model_name, rates]:slo_failure_rate_percent) {
-            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
-            float val = 0;
+        for(auto [model_name, total]:slo_total_per_model) {
+            auto ind = (slo_total_ind[model_name] - 1 + slo_total_size) % slo_total_size;
+            float num = 0;
+            float den = 0;
             for(int j=0;j<num_of_schedules;j++) {
                 auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
-                val += rates[ref_ind];
+                num += total[ref_ind].first;
+                den += total[ref_ind].first + total[ref_ind].second;
             }
-
+            
+            float val = 0;
+            if(den > 0) val = (num / den) * (100.0);
             stats_percent.push_back(val/num_of_schedules);
         }
 
         _lock_stats.unlock();
         return stats_percent;
+    }
+
+    std::vector<std::pair<float, float>> get_slo_total(int num_of_schedules) {
+        std::vector<std::pair<float, float>> stats_total;
+        _lock_stats.lock();
+        for(auto [model_name, total]:slo_total_per_model) {
+            auto ind = (slo_total_ind[model_name] - 1 + slo_total_size) % slo_total_size;
+            std::pair<float, float> val = {0.0f, 0.0f};
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                val.first += total[ref_ind].first;
+                val.second += total[ref_ind].second;
+            }
+
+            stats_total.push_back(val);
+        }
+
+        _lock_stats.unlock();
+        return stats_total;
     }
 
     float get_batch_fill_rate(int num_of_schedules) {
@@ -377,49 +398,6 @@ public:
         } fill_rate /= SLOTS_PER_GPU;
         _lock_stats.unlock();
         return fill_rate;
-    }
-
-    std::vector<std::vector<float>> get_slo_rate(int num_of_schedules) {
-        std::vector<float> stats_percent;
-        std::vector<float> stats_raw;
-        std::vector<float> stats_total;
-
-        _lock_stats.lock();
-        for(auto [model_name, rates]:slo_total_request_count) {
-            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
-            float val = 0;
-            for(int j=0;j<num_of_schedules;j++) {
-                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
-                val += rates[ref_ind];
-            }
-
-            stats_total.push_back(val/num_of_schedules);
-        }
-
-        for(auto [model_name, rates]:slo_failure_rate_percent) {
-            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
-            float val = 0;
-            for(int j=0;j<num_of_schedules;j++) {
-                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
-                val += rates[ref_ind];
-            }
-
-            stats_percent.push_back(val/num_of_schedules);
-        }
-
-        for(auto [model_name, rates]:slo_failure_rate_raw) {
-            auto ind = (slo_track_ind[model_name] - 1 + slo_track_size) % slo_track_size;
-            float val = 0;
-            for(int j=0;j<num_of_schedules;j++) {
-                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
-                val += rates[ref_ind];
-            }
-
-            stats_raw.push_back(val/num_of_schedules);
-        }
-
-        _lock_stats.unlock();
-        return {stats_percent, stats_raw, stats_total};
     }
 
     std::vector<float> get_inference_latency(int num_of_schedules) {
@@ -476,9 +454,8 @@ private:
     Node update_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> update_ort_list;
     std::map<std::string, std::string> modelsList;
-    std::map<std::string, std::vector<float>> slo_failure_rate_raw;
-    std::map<std::string, std::vector<float>> slo_failure_rate_percent;
-    std::map<std::string, std::vector<float>> slo_total_request_count;
+    std::map<std::string, std::vector<std::pair<float, float>>> slo_total_per_model;
+    std::map<std::string, int> slo_total_ind;
     std::map<std::string, std::vector<float>> inference_latency;
     std::map<std::string, int> slo_track_ind;
     std::vector<std::vector<float>> batch_fill_rate;
@@ -487,6 +464,7 @@ private:
     int inference_latency_size = 10;
     int slo_track_size = 10;
     int batch_fill_rate_track_size = 10;
+    int slo_total_size = 10;
     std::mutex _lock_stats;
     std::map<std::string, double> latencies;
     std::map<std::string, int> batch_for_model_update;
@@ -543,12 +521,10 @@ private:
                         success_count += count;
                     }
                 }
-                
-                slo_failure_rate_raw[model_name][slo_track_ind[model_name]] = fail_count;
-                slo_total_request_count[model_name][slo_track_ind[model_name]] = success_count + fail_count;
-                slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = 0;
-                if((success_count + fail_count) > 0) slo_failure_rate_percent[model_name][slo_track_ind[model_name]] = (fail_count / (success_count + fail_count)) * 100;
-                slo_track_ind[model_name] = (slo_track_ind[model_name] + 1) % slo_track_size;
+
+                // track total fail and success count
+                auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
+                stat.first += fail_count; stat.second += success_count;
 
                 // process inference latency
                 double infernce_latency_cal = (double(inference_end_time - inference_start_time)) / 1000.0;
@@ -672,6 +648,13 @@ private:
             
             // stop monitoring thread
             _schedule_running = false;
+
+            // check on all request queues
+            for(auto [model_name, processor]:request_processors) {
+                auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
+                stat.first += processor->form_batch(0, gpu_id)._stale_req_count;
+                slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
+            }
             
             // check if update is needded
             if(pendingUpdate) {

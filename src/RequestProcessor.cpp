@@ -78,7 +78,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     }
 
     // try to form from the request queue
-    while(batch_cur < batch_size) {
+    while(batch_cur <= batch_size) {
         std::shared_ptr<InferenceRequest> request;
         if(queue.try_dequeue(request)) {
             // discard stale requests
