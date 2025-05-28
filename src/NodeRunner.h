@@ -182,7 +182,7 @@ public:
 
         // initialize batch fill rate tracking for each model
         batch_fill_rate = std::vector<std::vector<float>> (SLOTS_PER_GPU, std::vector<float> (batch_fill_rate_track_size, 0.0f));
-        batch_fill_track_ind = std::vector<int> (batch_fill_rate_track_size, 0);
+        batch_fill_track_ind = std::vector<int> (SLOTS_PER_GPU, 0);
 
         // initialize ORTRunners for each session in node schedule
         cudaSetDevice(gpu_id);
@@ -341,13 +341,12 @@ public:
             auto ind = (batch_fill_track_ind[i] - 1 + batch_fill_rate_track_size) % batch_fill_rate_track_size;
             float val = 0;
             for(int j=0;j<num_of_schedules;j++) {
-                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                auto ref_ind = (ind - j + batch_fill_rate_track_size) % batch_fill_rate_track_size;
                 val += batch_fill_rate[i][ref_ind];
             }
 
             fill_rate += val/num_of_schedules;
         } fill_rate /= SLOTS_PER_GPU;
-
         _lock_stats.unlock();
         return fill_rate;
     }

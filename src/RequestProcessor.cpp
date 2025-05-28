@@ -61,7 +61,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         // discard buffer is stale
         auto request_slo_time = buffer->arrival_time + (int64_t)(latency_slo * 1000);
         if(est_process_time > request_slo_time) {
-            LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, buffer->request_count, time_now);
+            LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             stale_req += buffer->request_count;
             buffer = nullptr;
         } else {
@@ -84,7 +84,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
             // discard stale requests
             auto request_slo_time = request->arrival_time + (int64_t)(latency_slo * 1000);
             if(est_process_time >= request_slo_time) {
-                LOG_WARN(_logger, "SLO VIOLATED: model_name:{} reqeust_count:{} time_now:{}", model_name, request->request_count, time_now);
+                LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, request->request_count, time_now);
                 stale_req += request->request_count;
             } else {
                 last_request_arrival_time = request->arrival_time;

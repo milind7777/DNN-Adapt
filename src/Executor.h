@@ -165,7 +165,6 @@ public:
         float alpha = 1.0f;
         float beta  = 0.5f;
         float gamma = 0.5f;
-        
         LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
         std::vector<std::vector<std::vector<float>>> slo_rate;
         for(auto runner:_nodeRunnersList) {
@@ -192,12 +191,10 @@ public:
         float gpu_count = 0;
         for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
         gpu_count /= _gpuList.size();
-
         float batch_fill_penalty = 0;
         for(auto runner:_nodeRunnersList) {
             batch_fill_penalty += runner->get_batch_fill_rate(3);
         } batch_fill_penalty /= _nodeRunnersList.size();
-
         return - alpha * slo_penalty - beta * gpu_count - gamma * batch_fill_penalty;
     }
 
@@ -221,22 +218,19 @@ public:
             int model_id = entry.model_id();
             gpu_id = count / num_models;
 
-            if(model_id == num_models) {
-                count++;
-                continue;
+            if(model_id != num_models) {
+                std::string model_name = id_to_model[model_id];
+
+                bool in_parallel = entry.in_parallel();
+
+                int new_batch_size = std::max(0, batch_sizes[gpu_id][model_id] + batch_deltas[gpu_id * num_models + model_id]);
+                
+                if(new_batch_size>0) {
+                    std::shared_ptr<Session> session = std::make_shared<Session>(model_name, _latencies[model_name], 0, new_batch_size);
+                    session_list.push_back({session, {0, in_parallel}});
+                }
             }
 
-            std::string model_name = id_to_model[model_id];
-
-            bool in_parallel = entry.in_parallel();
-
-            int new_batch_size = std::max(0, batch_sizes[gpu_id][model_id] + batch_deltas[gpu_id * num_models + model_id]);
-            
-            if(new_batch_size>0) {
-                std::shared_ptr<Session> session = std::make_shared<Session>(model_name, _latencies[model_name], 0, new_batch_size);
-                session_list.push_back({session, {0, in_parallel}});
-            }
-            
             count++;
             if(count % num_models == 0) {
                 // make the node and call update
