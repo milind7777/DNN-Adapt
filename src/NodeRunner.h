@@ -69,7 +69,7 @@ public:
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
-        CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
+        CUDACHECK(cudaMallocAsync((void**)&gpu_ptr, total_bytes, _runner_stream));
         // std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
@@ -119,6 +119,8 @@ public:
             std::terminate();
         }
 
+        // free async memory
+        cudaFreeAsync(gpu_ptr, _runner_stream);
     }
 
     Ort::Env _env;
