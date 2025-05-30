@@ -23,6 +23,7 @@ message StepResponse {
     repeated float observation = 1;
     float reward = 2;
     bool done = 3;
+    repeated float info = 4;
 }
 
 service SchedulerSim {

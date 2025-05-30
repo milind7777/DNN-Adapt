@@ -72,7 +72,8 @@ class SchedulerEpisodeCallback(BaseCallback):
                 'min': float(np.min(obs)),
                 'max': float(np.max(obs))
             },
-            'pretty_schedule': pretty_schedule
+            'pretty_schedule': pretty_schedule,
+            'individual_reward': [float(r) for r in self.training_env.envs[0].unwrapped.last_info]
         }
         
         self.current_episode['steps'].append(step_data)
@@ -94,10 +95,21 @@ class SchedulerEpisodeCallback(BaseCallback):
             rewards = self.current_episode['rewards']
             valid_rewards = [r for r in rewards if not np.isnan(r)]
             
+            individual_rewards = np.sum([step['individual_reward'] for step in self.current_episode['steps']], axis=0)
+            # print("Type:", type(individual_rewards))
+            # print("Dtype:", individual_rewards.dtype)
+            # print("Length:", len(individual_rewards))
+            # print("Shape of arr[0]:", individual_rewards[0].shape)
+            # print("Type of arr[0]:", type(individual_rewards[0]))
+
             episode_summary = {
                 'episode': self.episode_count,
                 'timestamp': datetime.now().isoformat(),
                 'total_reward': sum(valid_rewards),
+                'slo_reward': float(individual_rewards[0]),
+                'gpu_reward': float(individual_rewards[1]),
+                'batch_fill_reward': float(individual_rewards[2]),
+                'slot_switch_reward': float(individual_rewards[3]),
                 'episode_length': len(self.current_episode['steps']),
                 'reward_stats': {
                     'mean': float(np.mean(valid_rewards)) if valid_rewards else 0.0,
@@ -174,7 +186,7 @@ class SchedulerEpisodeCallback(BaseCallback):
         for gpu_id in range(self.num_gpus):
             pretty_lines.append("****************************************************************************")
             pretty_lines.append(f"    GPU {gpu_id}: A6000  |  GPU MEMORY: 48GB | STEP: {len(self.current_episode['steps'])}")
-            pretty_lines.append("    Session List: {model_name, SLO, request_rate, current_batch, batch_delta, new_batch, execution_mode}")
+            pretty_lines.append("    Session List: {model_name, SLO, request_rate, observed_batch, batch_delta, deployed_batch, execution_mode}")
             
             # Process each slot for this GPU
             for slot_id in range(self.scheduler_slots):
@@ -199,8 +211,7 @@ class SchedulerEpisodeCallback(BaseCallback):
                     execution_mode = "parallel" if in_parallel else "sequential"
                     
                     pretty_lines.append(f"      Slot {slot_id}: {model_name}, {slo_latency:.1f}ms, {request_rate:.2f}req/s, "
-                                    f"current_batch={current_batch_size}, batch_delta={batch_delta:+d}, "
-                                    f"new_batch={new_batch_size}, {execution_mode}")
+                                    f"observed_batch={current_batch_size}, batch_delta={batch_delta:+d}, deployed_batch:{new_batch_size}, exe_mode:{execution_mode}")
                 else:
                     pretty_lines.append(f"      Slot {slot_id}: EMPTY")
             
@@ -260,7 +271,7 @@ def main():
         verbose=1, 
         device='cpu', 
         n_steps=60, 
-        #batch_size=5,
+        batch_size=20,
         tensorboard_log="./tb_logs"
     )
 

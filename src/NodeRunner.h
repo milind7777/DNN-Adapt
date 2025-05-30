@@ -256,14 +256,23 @@ public:
 
     void updateNode(Node updated_node) {
         _update.lock();
+        int penalty = 0;
 
         for(auto [model_name, _]:modelsList) {
             batch_for_model_update[model_name] = 0;
         }
 
+        std::map<std::string, bool> existingModelList;
+        for(auto [model_name,_]:modelsList) existingModelList[model_name] = 0;
+        for(auto& [session_ptr, _]:running_node.session_list) {
+            existingModelList[session_ptr->model_name] = 1;
+        }
+
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: updated_node.session_list) {
             auto model_name = session_ptr->model_name;
+            // keep track of existing models
+            existingModelList[model_name] = 0;
 
             // update batch tracking
             batch_for_model_update[model_name] = session_ptr->batch_size;
@@ -285,6 +294,7 @@ public:
                 update_ort_list.push_back(ort_list[existingInd]);
             } else {
                 LOG_DEBUG(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
+                penalty++;
                 Ort::SessionOptions gpu_session_options;
                 OrtCUDAProviderOptions cuda_options;
                 cuda_options.device_id = gpu_id;
@@ -322,6 +332,12 @@ public:
             }
         }
         
+        for(auto [model_name, isGone]:existingModelList) {
+            if(isGone) penalty++;
+        }
+
+        slot_switch_penalty = penalty / SLOTS_PER_GPU;
+
         update_node = updated_node;
         pendingUpdate = true;
         _update.unlock();
@@ -428,6 +444,10 @@ public:
         return batch_sizes;
     }
 
+    int get_slot_switch_penalty() {
+        return slot_switch_penalty;
+    }
+
     bool gpu_in_use() {
         for(const auto &[_, batch_size]:batch_for_model) {
             if(batch_size > 0) return true;
@@ -471,6 +491,7 @@ private:
     std::map<std::string, int> batch_for_model;
     int peak_mem_per_schedule = 0; // in MB
     int peak_mem_per_schedule_cur = 0; // in MB
+    int slot_switch_penalty = 0; // normalized
 
     struct CallbackData {
         std::string _tag;
@@ -523,6 +544,7 @@ private:
                 }
 
                 // track total fail and success count
+                LOG_DEBUG(_logger, "Post process async fail count: {}, success count: {}", fail_count, success_count);
                 auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
                 stat.first += fail_count; stat.second += success_count;
 
@@ -564,6 +586,7 @@ private:
     void run() {
         CUDACHECK(cudaSetDevice(gpu_id));
         _running = true;
+        LOG_DEBUG(_logger, "NODE RUN: Start run loop for gpu:{}", gpu_id);
         while(_running) {
             if(!_running) break;
 
@@ -574,6 +597,7 @@ private:
 
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
+                LOG_DEBUG(_logger, "NODE RUN: Found node with number of session: {}", running_node.session_list.size());
                 // LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
                 
                 // keep track of active streams to enable parallel execution
@@ -587,6 +611,8 @@ private:
                     auto session_ptr = running_node.session_list[i].first;
                     auto occ_ratio = running_node.session_list[i].second.first;
                     auto is_parallel = running_node.session_list[i].second.second;
+
+                    LOG_DEBUG(_logger, "NODE RUN: Running slot: {}, with model: {}", slot_num, session_ptr->model_name);
 
                     if(is_parallel == 0) {
                         // wait for previous streams to complete
@@ -642,8 +668,12 @@ private:
                 auto duration_ms = running_node.duty_cycle;
                 if(elapsed_time.count() < duration_ms) {
                     auto sleep_time_ms = std::chrono::milliseconds((long long)duration_ms - elapsed_time.count());
+                    LOG_DEBUG(_logger, "NODE RUN: Going to sleep for time: {}", sleep_time_ms.count()); 
                     std::this_thread::sleep_for(sleep_time_ms);
                 }
+            } else {
+                LOG_DEBUG(_logger, "NODE RUN: Pause for 100ms when node is empty");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
             }
             
             // stop monitoring thread
@@ -652,6 +682,7 @@ private:
             // check on all request queues
             for(auto [model_name, processor]:request_processors) {
                 auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
+                LOG_DEBUG(_logger, "NODE RUN: Calling form batch with batch size 0 for {}", model_name); 
                 stat.first += processor->form_batch(0, gpu_id)._stale_req_count;
                 slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
             }

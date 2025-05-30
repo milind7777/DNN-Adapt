@@ -1,5 +1,7 @@
 #include "RequestProcessor.h"
 #include <iostream>
+#include <filesystem>
+#include "csv.h"
 
 /*
    NOTE: We do not care about the different inputs for each request for the purpose of these experiments, we only care about the request counts
@@ -37,6 +39,43 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     queue.enqueue(request_copy);
 }
 
+std::vector<double> loadCSVFile(const std::string &filePath, const std::string column) {
+    std::vector<double> latencies(MAX_BATCH_SIZE+1, 0.0);
+    io::CSVReader<2> csvReader(filePath);
+    csvReader.read_header(io::ignore_extra_column, BATCH_COLUMN, LATENCY_COLUMN);
+
+    int batchSize;
+    int rowCount = 0;
+    double latency;
+
+    while(csvReader.read_row(batchSize, latency)) {
+        if(batchSize >= 1 && batchSize <= MAX_BATCH_SIZE) {
+            latencies[batchSize] = latency;
+            rowCount++;
+        } else {
+            std::cerr << "Warning: batch_size " << batchSize << " is out of bounds" << std::endl;
+        }
+    } latencies.resize(rowCount+1);
+
+    return latencies;
+}
+
+std::map<std::string, std::map<std::string, std::vector<double>>> loadProfile(const std::string &folderPath) {
+    std::map<std::string, std::map<std::string, std::vector<double>>> model_profiles;
+    for(const auto &entry: std::filesystem::directory_iterator(folderPath)) {
+        if(entry.is_regular_file() && entry.path().extension() == ".csv") {
+            std::string filePath = entry.path().string();
+            std::string modelName = entry.path().stem().string();
+
+            model_profiles[modelName][LATENCY_COLUMN] = loadCSVFile(filePath, LATENCY_COLUMN); 
+        }
+    }
+
+    return model_profiles;
+}
+
+std::map<std::string, std::map<std::string, std::vector<double>>> RequestProcessor::model_profiles = loadProfile("models/profiles/system");
+
 BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     int batch_cur = 0;
     int stale_req = 0;
@@ -44,7 +83,9 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     std::vector<std::pair<int, int64_t>> batch_timing_info;
     
     // acquire lock to prevent parallel batch forming
+    LOG_DEBUG(_logger, "WAITING TO ACQUIRE LOCK");
     _lock_batch.lock();
+    if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: form batch with batch 0");
 
     // get current time
     auto now = std::chrono::high_resolution_clock::now();
@@ -54,17 +95,23 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
 
     // get time within which batch will be processed
     // auto est_process_time = time_now + (int64_t)((latency_slo / 2) * 1000);
-    auto est_process_time = time_now;
+    auto est_process_time = time_now + model_profiles[model_name][LATENCY_COLUMN][batch_size] * 1000;
 
     // try to form batch from buffer first
     if(buffer != nullptr) {
         // discard buffer is stale
         auto request_slo_time = buffer->arrival_time + (int64_t)(latency_slo * 1000);
+        if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: buffer not null: {}, {}", est_process_time, request_slo_time);
         if(est_process_time > request_slo_time) {
             LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             stale_req += buffer->request_count;
             buffer = nullptr;
         } else {
+            if(batch_size == 0) {
+                _lock_batch.unlock();
+                return BatchInfo(0, 0, {});
+            }
+
             if(buffer->request_count > batch_size) {
                 buffer->request_count -= batch_size;
                 batch_cur = batch_size;
@@ -83,6 +130,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         if(queue.try_dequeue(request)) {
             // discard stale requests
             auto request_slo_time = request->arrival_time + (int64_t)(latency_slo * 1000);
+            if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: trying from request queue: {}, {}", est_process_time, request_slo_time);
             if(est_process_time >= request_slo_time) {
                 LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, request->request_count, time_now);
                 stale_req += request->request_count;
@@ -112,6 +160,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         }
     }
     
+    if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: stale: {}, queue size: {}", stale_req, get_size());
     return BatchInfo(batch_cur, stale_req, batch_timing_info);
 }
 
@@ -143,7 +192,9 @@ double RequestProcessor::get_request_rate() {
 
 void RequestProcessor::clear_queue() {
     // reset queue by redeclaring it
+    LOG_DEBUG(_logger, "Queue clear called");
     _lock_batch.lock();
+    buffer = nullptr;
     queue = moodycamel::ConcurrentQueue<std::shared_ptr<InferenceRequest>>();
     _lock_batch.unlock();
 }

@@ -23,7 +23,7 @@
 #include "grpc_scheduler.h"
 
 const int SLOTS_PER_GPU = 3;
-int SIMULATION_LEN = 120; // in seconds
+int SIMULATION_LEN = 60; // in seconds
 
 bool pathExists(const std::string &path) {
     return std::filesystem::exists(path);
@@ -150,9 +150,9 @@ int main(int argc, char * argv[]) {
 
     // populate SLO latencies for each model in ms
     std::map<std::string, double> latencies;
-    latencies["vit16"] = 1000.0;
-    latencies["resnet18"] = 500.0;
-    latencies["efficientnetb0"] = 200.0;
+    latencies["vit16"] = 1500.0;
+    latencies["resnet18"] = 1000.0;
+    latencies["efficientnetb0"] = 1000.0;
 
     // generate mmap for image bin file
     auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");

@@ -3,12 +3,16 @@
 
 #include "concurrentqueue.h"
 #include "Logger.h"
+#include <map>
 #include <ctime>
 #include <chrono>
 #include <atomic>
 #include <memory>
 #include <iostream>
 
+extern const std::string LATENCY_COLUMN;
+extern const int MAX_BATCH_SIZE;
+extern const std::string BATCH_COLUMN;
 const int RATE_CALCULATION_DURATION = 3; // the time window in seconds over which request rate is calculated
 
 struct InferenceRequest {
@@ -44,6 +48,8 @@ private:
     int _id = 0;
     std::mutex _lock_batch;
     std::shared_ptr<spdlog::logger> _logger;
+
+    static std::map<std::string, std::map<std::string, std::vector<double>>> model_profiles;
     
 public:
     RequestProcessor(std::string model_name, double latency): model_name(model_name), latency_slo(latency) {

@@ -136,9 +136,12 @@ void Simulator::run(int seed) {
 
     int min = 0;
     int max = 50;
-    schedules["efficientnetb0"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
-    schedules["resnet18"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
-    schedules["vit16"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    schedules["efficientnetb0"][1].second.second[0] *= max;
+    schedules["resnet18"][1].second.second[0] *= max;
+    schedules["vit16"][1].second.second[0] *= max;
+    // schedules["efficientnetb0"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    // schedules["resnet18"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    // schedules["vit16"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
 
     // reset flags
     stop_flag = false;

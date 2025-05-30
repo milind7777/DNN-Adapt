@@ -164,15 +164,17 @@ public:
         return observation;
     }
 
-    float get_reward(int num_schedules) {
+    std::vector<float> get_reward(int num_schedules) {
         // Reward = - alpha * slo failure rate
         //          - beta  * num of GPUs
         //          - gamma * batch fill rate
+        //          - omega * slot switch rate  
         //
-        // alpha = 1.0f, beta = 0.5f, // gamma = 0.5f
+        // alpha = 1.0f, beta = 0.2f, gamma = 0.2f, omega = 0.2f
         float alpha = 1.0f;
-        float beta  = 0.5f;
-        float gamma = 0.5f;
+        float beta  = 0.2f;
+        float gamma = 0.2f;
+        float omega = 0.2f;
 
         int m = _modelsList.size();
         std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
@@ -184,15 +186,16 @@ public:
             }
         }
 
-        float slo_fail_total = 0;
-        float slo_success_total = 0;
-        for(int i=0;i<m;i++) {
-            slo_fail_total += slo_total[i].first;
-            slo_success_total += slo_total[i].second;
-        } 
-
         float slo_penalty = 0;
-        if((slo_fail_total + slo_success_total) > 0) slo_penalty = slo_fail_total / (slo_fail_total + slo_success_total);
+        for(int i=0;i<m;i++) {
+            float slo_fail_total = slo_total[i].first;
+            float slo_cnt_total = slo_total[i].first + slo_total[i].second;
+            if(slo_cnt_total > 0) slo_penalty += slo_fail_total / slo_cnt_total;
+            LOG_DEBUG(_logger, "SLO LOGGING: {}, fail: {}, success{}", i, slo_fail_total, slo_cnt_total);
+        } slo_penalty /= m;
+
+        // float slo_penalty = 0;
+        // if((slo_fail_total + slo_success_total) > 0) slo_penalty = slo_fail_total / (slo_fail_total + slo_success_total);
 
         // LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
         // std::vector<std::vector<std::vector<float>>> slo_rate;
@@ -223,13 +226,25 @@ public:
         
         float batch_fill_penalty = 0;
         for(auto runner:_nodeRunnersList) {
-            batch_fill_penalty += runner->get_batch_fill_rate(3);
+            batch_fill_penalty += (1 - runner->get_batch_fill_rate(3));
         } batch_fill_penalty /= (_nodeRunnersList.size() * 100.0);
 
-        return - alpha * slo_penalty - beta * gpu_count - gamma * batch_fill_penalty;
+        float slot_switch_penalty = 0;
+        for(auto runner:_nodeRunnersList) {
+            slot_switch_penalty += runner->get_slot_switch_penalty();
+        } slot_switch_penalty /= _gpuList.size();
+
+        float mask = 1;
+        if(slo_penalty >= .05) mask = 0;
+
+        std::vector<float> reward = { alpha * (1 - slo_penalty), beta * (1 - gpu_count) * mask, gamma * (1 - batch_fill_penalty) * mask, omega * (1 - slot_switch_penalty) * mask};
+        return reward;
     }
 
+    int step_count = 0;
     void update_schedule(const StepRequest *request) {
+        step_count++;
+
         std::vector<int> batch_deltas;
         for(int delta:request->batch_deltas()) {
             batch_deltas.push_back(delta);
@@ -245,6 +260,8 @@ public:
         int num_gpus = _gpuList.size();
         int num_models = _modelsList.size();
         std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list;
+
+        LOG_DEBUG(_logger, "UPDATE LOG: {}", step_count);
         for(const auto& entry:request->entries()) {
             int model_id = entry.model_id();
             gpu_id = count / num_models;
@@ -256,6 +273,7 @@ public:
 
                 int new_batch_size = std::max(0, batch_sizes[gpu_id][model_id] + batch_deltas[gpu_id * num_models + model_id]);
                 
+                LOG_DEBUG(_logger, "UPDATE LOG: gpu: {}, model: {}, batch size: {}", gpu_id, model_name, new_batch_size);
                 if(new_batch_size>0) {
                     std::shared_ptr<Session> session = std::make_shared<Session>(model_name, _latencies[model_name], 0, new_batch_size);
                     session_list.push_back({session, {0, in_parallel}});
@@ -271,8 +289,6 @@ public:
                 session_list.clear();
             }
         }
-
-        std::cout << "Done with update\n";
     }
 
     void start() {

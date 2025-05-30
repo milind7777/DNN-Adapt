@@ -17,6 +17,7 @@ class InferenceSchedulerEnv(gym.Env):
         self.num_gpus = num_gpus
         self.num_models = num_models
         self.scheduler_slots = scheduler_slots
+        self.last_info = {}
 
         self.channel = grpc.insecure_channel(address)
         self.stub = agent_scheduler_pb2_grpc.SchedulerSimStub(self.channel)
@@ -108,6 +109,9 @@ class InferenceSchedulerEnv(gym.Env):
         terminated = response.done
         truncated = False
         info = {}
+
+        # track contribution from each aspect of the reward
+        self.last_info = np.array(response.info, dtype=np.float32)
 
         return observation, reward, terminated, truncated, info
     

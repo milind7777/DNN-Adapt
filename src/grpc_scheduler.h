@@ -53,7 +53,7 @@ public:
         _executor->update_schedule(request);
 
         // wait for 1 second for state to update
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
         // get observation after step
         std::vector<float> observation = _executor->get_observation();
@@ -62,7 +62,13 @@ public:
         }
 
         // set reward
-        response->set_reward(_executor->get_reward(3));
+        std::vector<float> reward = _executor->get_reward(3);
+        float total_reward = 0;
+        for(auto entry:reward) {
+            total_reward += entry;
+            response->add_info(entry);
+        }
+        response->set_reward(total_reward);
         
         // update step count
         step_count++;
