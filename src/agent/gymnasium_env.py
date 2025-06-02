@@ -44,7 +44,7 @@ class InferenceSchedulerEnv(gym.Env):
         #     ?   2. Batch size - float (normalized)
         #     ?   3. In parallel - bool
 
-        # Model Space Vector Dimension = (4 * models) + (slots * gpus * (models + 2)) = 12 + 30 = 42
+        # Model Space Vector Dimension = (4 * models) + (slots * gpus * (models + 1 + 2)) = 12 + 36 = 48
         self.model_feature_dim = 4 * self.num_models + (self.scheduler_slots * self.num_gpus * (self.num_models + 1 + 2))
 
         self.max_request_rate = 100.0
@@ -121,8 +121,8 @@ class InferenceSchedulerEnv(gym.Env):
         
         entry = agent_scheduler_pb2.SlotEntry()
         entry.slot_id = action[0]
-        entry.model_id = actions[1]
-        entry.batch_delta = action[2]
+        entry.model_id = action[1]
+        entry.batch_delta = self._get_batch_delta(action[2])
         entry.in_parallel = action[3]
 
         grpc_req.slot_entry = entry
