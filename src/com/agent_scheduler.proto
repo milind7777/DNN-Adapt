@@ -14,9 +14,20 @@ message ScheduleEntry {
     bool in_parallel = 3;
 }
 
+message SlotEntry {
+    int32 slot_id = 1;
+    int32 model_id = 2;
+    int32 batch_delta = 3;
+    bool in_parallel = 4;
+}
+
 message StepRequest {
     repeated ScheduleEntry entries = 1;
     repeated int32 batch_deltas = 2;
+}
+
+message StepRequestReduced  {
+    SlotEntry slot_entry = 1;
 }
 
 message StepResponse {
