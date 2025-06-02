@@ -191,6 +191,11 @@ public:
         // initialize ORTRunners for each session in node schedule
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: running_node.session_list) {
+            if(session_ptr->model_name == "EMPTY") {
+                ort_list.push_back({nullptr, nullptr});
+                continue;
+            }
+            
             // update batch tracking
             batch_for_model[session_ptr->model_name] = session_ptr->batch_size;
 
