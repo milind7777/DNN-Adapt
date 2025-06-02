@@ -22,26 +22,21 @@ class SchedulerEpisodeCallback(BaseCallback):
         self.episode_data = []
         self.current_episode = {
             'steps': [],
-            'schedule_actions': [],
-            'batch_actions': [],
+            'reduced_actions': [],  # Changed from schedule_actions/batch_actions
             'observations': [],
             'rewards': []
         }
         self.episode_count = 0
         
         # Model names for pretty printing
-        self.model_names = ["efficientnetb0" ,"resnet18", "vit16"]
-        self.model_feature_dim = 2 + 3 * self.num_gpus  # 2 + 3 * num_gpus
+        self.model_names = ["efficientnetb0", "resnet18", "vit16"]
         
     def _on_step(self) -> bool:
         # Extract scheduler-specific data
         action = self.locals['actions'][0]
         obs = self.locals['obs_tensor'][0].cpu().numpy()
         reward = float(self.locals['rewards'][0])
-        #terminated = self.locals['']
         done = bool(self.locals['dones'][0])
-        # If done, finalize the current episode
-        # print("Done:", done)
         
         # Check for NaN values
         if np.isnan(reward):
@@ -52,20 +47,22 @@ class SchedulerEpisodeCallback(BaseCallback):
             print(f"WARNING: NaN observation detected at step {len(self.current_episode['steps'])}")
             obs = np.nan_to_num(obs, nan=0.0)
         
-        # Parse action into schedule and batch components
-        schedule_fields = 2 * self.num_gpus * self.scheduler_slots
-        schedule_action = action[:schedule_fields].tolist()
-        batch_action = action[schedule_fields:].tolist()
+        # Parse reduced action format: [slot_id, model_id, batch_delta, in_parallel]
+        reduced_action = action.tolist()
         
-        # Create  printed schedule
-        pretty_schedule = self._create_pretty_schedule(schedule_action, batch_action, obs)
+        # Print observation space info every 10 steps or on first step of episode
+        step_num = len(self.current_episode['steps'])
+        if step_num == 0 or step_num % 10 == 0:
+            self._print_observation_space(obs, step_num)
+        
+        # Create pretty printed schedule
+        pretty_schedule = self._create_pretty_schedule_reduced(reduced_action, obs)
         
         # Store step data
         step_data = {
             'step': len(self.current_episode['steps']),
             'reward': reward,
-            'schedule_action': schedule_action,
-            'batch_action': batch_action,
+            'reduced_action': reduced_action,
             'observation_summary': {
                 'mean': float(np.mean(obs)),
                 'std': float(np.std(obs)),
@@ -77,8 +74,7 @@ class SchedulerEpisodeCallback(BaseCallback):
         }
         
         self.current_episode['steps'].append(step_data)
-        self.current_episode['schedule_actions'].append(schedule_action)
-        self.current_episode['batch_actions'].append(batch_action)
+        self.current_episode['reduced_actions'].append(reduced_action)
         self.current_episode['observations'].append(obs.tolist())
         self.current_episode['rewards'].append(reward)
         
@@ -88,7 +84,7 @@ class SchedulerEpisodeCallback(BaseCallback):
             self._process_completed_episode()
         return True
 
-    # ADD THIS ENTIRE METHOD after _on_step and before _create_pretty_schedule
+    # after _on_step and before _create_pretty_schedule
     def _process_completed_episode(self):
         """Process completed episode immediately when done=True"""
         if len(self.current_episode['steps']) > 0:
@@ -138,82 +134,103 @@ class SchedulerEpisodeCallback(BaseCallback):
             
             # Reset for next episode
             self.current_episode = {
-                'steps': [], 'schedule_actions': [], 'batch_actions': [], 
-                'observations': [], 'rewards': []
+                'steps': [], 'reduced_actions': [], 'observations': [], 'rewards': []
             }
             self.episode_count += 1
 
 
-    def _create_pretty_schedule(self, schedule_action, batch_action, observation):
-        """Create a pretty-printed schedule similar to C++ Node::pretty_print()"""
+    def _create_pretty_schedule_reduced(self, reduced_action, observation):
+        """Create pretty schedule for reduced action format """
         pretty_lines = []
         
-        # Extract observation data based on environment 
-        obs_idx = 0
+        # Parse reduced action: [slot_id, model_id, batch_delta, in_parallel]
+        action_slot_id = reduced_action[0] if reduced_action[0] < self.num_gpus * self.scheduler_slots else -1
+        action_model_id = reduced_action[1] if reduced_action[1] < self.num_models else -1
+        batch_delta = reduced_action[2] - 4  # Convert back to actual delta
+        in_parallel = bool(reduced_action[3])
+        
+        # Extract model data from new observation structure
         model_data = []
-        
-        for model_id in range(self.num_models):
+        for m_id in range(self.num_models):
+            base_idx = m_id * 4
             model_info = {
-                'request_rate': observation[obs_idx] * 200.0,  # Denormalize
-                'slo_latency': observation[obs_idx + 1] * 5000.0,  # Denormalize
-                'slo_satisfaction': [],
-                'gpu_locations': [],
-                'batch_sizes': []
+                'request_rate': observation[base_idx] * 100.0,  # Denormalize
+                'queue_size': observation[base_idx + 1] * 500.0,  # Denormalize
+                'slo_latency': observation[base_idx + 2] * 2000.0,  # Denormalize
+                'slo_satisfaction': observation[base_idx + 3] * 100.0  # Denormalize
             }
-            
-            # SLO satisfaction rates (3 values per model for num_gpus)
-            offset = 2
-            for j in range(self.num_gpus):
-                slo_sat = observation[obs_idx + offset + j] * 100.0  # Denormalize to percentage
-                model_info['slo_satisfaction'].append(slo_sat)
-            
-            # GPU locations (num_gpus values)
-            offset = 2 + self.num_gpus
-            for j in range(self.num_gpus):
-                gpu_loc = int(observation[obs_idx + offset + j])
-                model_info['gpu_locations'].append(gpu_loc)
-            
-            # Current batch sizes (num_gpus values) - these are the current batch sizes
-            offset = 2 + 2 * self.num_gpus
-            for j in range(self.num_gpus):
-                current_batch = observation[obs_idx + offset + j] * 1024.0  # Denormalize
-                model_info['batch_sizes'].append(int(current_batch))
-            
             model_data.append(model_info)
-            obs_idx += self.model_feature_dim  # Move to next model (2 + 3 * num_gpus)
         
-        # Create schedule for each GPU
+        # Extract current slot configurations from observation
+        slot_start_idx = 4 * self.num_models
+        features_per_slot = self.num_models + 1 + 2
+        
+        current_slots = []
+        for s_id in range(self.num_gpus * self.scheduler_slots):
+            base_idx = slot_start_idx + s_id * features_per_slot
+            
+            # Find deployed model from one-hot encoding
+            deployed_model = -1
+            for m in range(self.num_models):
+                if base_idx + m < len(observation) and observation[base_idx + m] > 0.5:
+                    deployed_model = m
+                    break
+            
+            # Get batch size and parallel flag
+            batch_size = int(observation[base_idx + self.num_models] * 512.0) if base_idx + self.num_models < len(observation) else 0
+            is_parallel = observation[base_idx + self.num_models + 1] > 0.5 if base_idx + self.num_models + 1 < len(observation) else False
+            
+            current_slots.append({
+                'model_id': deployed_model,
+                'batch_size': batch_size,
+                'in_parallel': is_parallel
+            })
+        
+        # Create schedule for each GPU (similar to old format)
         for gpu_id in range(self.num_gpus):
             pretty_lines.append("****************************************************************************")
             pretty_lines.append(f"    GPU {gpu_id}: A6000  |  GPU MEMORY: 48GB | STEP: {len(self.current_episode['steps'])}")
-            pretty_lines.append("    Session List: {model_name, SLO, request_rate, observed_batch, batch_delta, deployed_batch, execution_mode}")
+            pretty_lines.append("    Session List: {model_name, SLO, request_rate, queue_size, current_batch, batch_delta, new_batch, execution_mode}")
+            
+            # Show action being taken if it affects this GPU
+            action_gpu_id = action_slot_id // self.scheduler_slots if action_slot_id >= 0 else -1
+            action_slot_idx = action_slot_id % self.scheduler_slots if action_slot_id >= 0 else -1
+            
+            if action_gpu_id == gpu_id and action_slot_id >= 0:
+                pretty_lines.append(f"    >>> ACTION: Modifying Slot {action_slot_idx} -> Model {action_model_id}, Delta {batch_delta}, Parallel {in_parallel}")
             
             # Process each slot for this GPU
-            for slot_id in range(self.scheduler_slots):
-                slot_idx = (gpu_id * self.scheduler_slots + slot_id) * 2
-                model_id = schedule_action[slot_idx]
-                in_parallel = schedule_action[slot_idx + 1]
+            for slot_idx in range(self.scheduler_slots):
+                global_slot_id = gpu_id * self.scheduler_slots + slot_idx
+                slot_info = current_slots[global_slot_id]
                 
-                if model_id < self.num_models:  # Valid model
-                    # Get batch delta for this model on this GPU
-                    batch_idx = gpu_id * self.num_models + model_id
-                    batch_delta = batch_action[batch_idx] - 4  # Apply _get_batch_delta conversion
+                if slot_info['model_id'] >= 0:  # Valid model deployed
+                    model_name = self.model_names[slot_info['model_id']]
+                    model_info = model_data[slot_info['model_id']]
+                    execution_mode = "parallel" if slot_info['in_parallel'] else "sequential"
                     
-                    # Get current batch size from observation for this model on this GPU
-                    current_batch_size = model_data[model_id]['batch_sizes'][gpu_id]
+                    # get new batch size if this slot is being modified
+                    current_batch_size = slot_info['batch_size']
+                    new_batch_size = current_batch_size
                     
-                    # Calculate new batch size after applying delta
-                    new_batch_size = max(1, current_batch_size + batch_delta)  # Ensure positive
-                    
-                    model_name = self.model_names[model_id]
-                    request_rate = model_data[model_id]['request_rate']
-                    slo_latency = model_data[model_id]['slo_latency']
-                    execution_mode = "parallel" if in_parallel else "sequential"
-                    
-                    pretty_lines.append(f"      Slot {slot_id}: {model_name}, {slo_latency:.1f}ms, {request_rate:.2f}req/s, "
-                                    f"observed_batch={current_batch_size}, batch_delta={batch_delta:+d}, deployed_batch:{new_batch_size}, exe_mode:{execution_mode}")
+                    if global_slot_id == action_slot_id and action_model_id == slot_info['model_id']:
+                        new_batch_size = max(1, current_batch_size + batch_delta)
+                        pretty_lines.append(f"      Slot {slot_idx}: {model_name}, {model_info['slo_latency']:.1f}ms, {model_info['request_rate']:.2f}req/s, "
+                                          f"queue={model_info['queue_size']:.0f}, current_batch={current_batch_size}, batch_delta={batch_delta:+d}, new_batch={new_batch_size}, exe_mode:{execution_mode}")
+                    else:
+                        pretty_lines.append(f"      Slot {slot_idx}: {model_name}, {model_info['slo_latency']:.1f}ms, {model_info['request_rate']:.2f}req/s, "
+                                          f"queue={model_info['queue_size']:.0f}, current_batch={current_batch_size}, batch_delta=+0, new_batch={new_batch_size}, exe_mode:{execution_mode}")
                 else:
-                    pretty_lines.append(f"      Slot {slot_id}: EMPTY")
+                    # Check if this empty slot is being filled by the action
+                    if global_slot_id == action_slot_id and action_model_id >= 0:
+                        model_name = self.model_names[action_model_id]
+                        model_info = model_data[action_model_id]
+                        execution_mode = "parallel" if in_parallel else "sequential"
+                        new_batch_size = max(1, batch_delta)  # Starting from 0 + delta
+                        pretty_lines.append(f"      Slot {slot_idx}: {model_name}, {model_info['slo_latency']:.1f}ms, {model_info['request_rate']:.2f}req/s, "
+                                          f"queue={model_info['queue_size']:.0f}, current_batch=0, batch_delta={batch_delta:+d}, new_batch={new_batch_size}, exe_mode:{execution_mode}")
+                    else:
+                        pretty_lines.append(f"      Slot {slot_idx}: EMPTY")
             
             pretty_lines.append("****************************************************************************")
             pretty_lines.append("")  
@@ -238,13 +255,63 @@ class SchedulerEpisodeCallback(BaseCallback):
     #         self._process_completed_episode()
         
     def _calculate_schedule_diversity(self):
-        if not self.current_episode['schedule_actions']:
+        if not self.current_episode['reduced_actions']:
             return 0.0
         
-        unique_schedules = len(set(map(tuple, self.current_episode['schedule_actions'])))
-        total_schedules = len(self.current_episode['schedule_actions'])
-        return unique_schedules / total_schedules if total_schedules > 0 else 0.0
+        unique_actions = len(set(map(tuple, self.current_episode['reduced_actions'])))
+        total_actions = len(self.current_episode['reduced_actions'])
+        return unique_actions / total_actions if total_actions > 0 else 0.0
 
+    def _print_observation_space(self, observation, step_num):
+        """Print detailed observation space information"""
+        print(f"\n{'='*60}")
+        print(f"OBSERVATION SPACE - Episode {self.episode_count}, Step {step_num}")
+        print(f"{'='*60}")
+        print(f"Observation length: {len(observation)}")
+        print(f"Observation shape: {observation.shape}")
+        print(f"Observation range: [{np.min(observation):.4f}, {np.max(observation):.4f}]")
+        print(f"Mean: {np.mean(observation):.4f}, Std: {np.std(observation):.4f}")
+        
+        # Print model features section
+        print(f"\n--- MODEL FEATURES (indices 0-{4*self.num_models-1}) ---")
+        for m_id in range(self.num_models):
+            base_idx = m_id * 4
+            if base_idx + 3 < len(observation):
+                print(f"Model {m_id} ({self.model_names[m_id]}):")
+                print(f"  Request Rate (norm): {observation[base_idx]:.4f}")
+                print(f"  Queue Size (norm):   {observation[base_idx+1]:.4f}")
+                print(f"  SLO Latency (norm):  {observation[base_idx+2]:.4f}")
+                print(f"  SLO Satisfaction:    {observation[base_idx+3]:.4f}")
+        
+        # Print slot features section
+        slot_start_idx = 4 * self.num_models
+        features_per_slot = self.num_models + 1 + 2
+        print(f"\n--- SLOT FEATURES (indices {slot_start_idx}-{len(observation)-1}) ---")
+        
+        for s_id in range(self.num_gpus * self.scheduler_slots):
+            base_idx = slot_start_idx + s_id * features_per_slot
+            gpu_id = s_id // self.scheduler_slots
+            slot_idx = s_id % self.scheduler_slots
+            
+            if base_idx + features_per_slot <= len(observation):
+                # Find deployed model from one-hot encoding
+                deployed_model = -1
+                one_hot_vals = []
+                for m in range(self.num_models):
+                    val = observation[base_idx + m]
+                    one_hot_vals.append(val)
+                    if val > 0.5:
+                        deployed_model = m
+                
+                batch_size_norm = observation[base_idx + self.num_models] if base_idx + self.num_models < len(observation) else 0
+                parallel_flag = observation[base_idx + self.num_models + 1] if base_idx + self.num_models + 1 < len(observation) else 0
+                
+                print(f"GPU {gpu_id}, Slot {slot_idx} (global slot {s_id}):")
+                print(f"  One-hot encoding: {[f'{v:.3f}' for v in one_hot_vals]} -> Model {deployed_model}")
+                print(f"  Batch size (norm): {batch_size_norm:.4f}")
+                print(f"  Parallel flag: {parallel_flag:.4f}")
+        
+        print(f"{'='*60}\n")
 
 def main():
     # Environment parameters

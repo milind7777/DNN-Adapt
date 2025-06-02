@@ -104,7 +104,12 @@ class InferenceSchedulerEnv(gym.Env):
         response = self.stub.Reset(grpc_req)
 
         raw_observation = np.array(response.observation, dtype=np.float32)
+        print(f"\nENV RESET - Raw observation length: {len(raw_observation)}")
+        print(f"Expected observation length: {self.model_feature_dim}")
+        print(f"Raw observation range: [{np.min(raw_observation):.4f}, {np.max(raw_observation):.4f}]")
+        
         observation = self._process_observation_per_slot(raw_observation)
+        print(f"Processed observation range: [{np.min(observation):.4f}, {np.max(observation):.4f}]")
         info = None
 
         return observation, info
@@ -113,10 +118,6 @@ class InferenceSchedulerEnv(gym.Env):
         return delta - 4
     
     def step(self, action):
-        # schedule_fields = 2 * self.num_gpus * self.scheduler_slots
-        # schedule_entry_actions = action[:schedule_fields]
-        # batch_delta_actions    = action[schedule_fields:]
-
         grpc_req = agent_scheduler_pb2.StepRequestReduced()
         
         entry = agent_scheduler_pb2.SlotEntry()
@@ -126,15 +127,6 @@ class InferenceSchedulerEnv(gym.Env):
         entry.in_parallel = action[3]
 
         grpc_req.slot_entry = entry
-
-        # for i in range(0, schedule_fields, 2):
-        #     entry = agent_scheduler_pb2.ScheduleEntry()
-        #     entry.model_id = action[i]
-        #     entry.in_parallel = action[i+1]
-        #     grpc_req.entries.append(entry)
-
-        # for i in range(0, len(batch_delta_actions)):
-        #     grpc_req.batch_deltas.append(self._get_batch_delta(batch_delta_actions[i]))
 
         # take the step in the cpp scheduler system
         response = self.stub.StepReduced(grpc_req)
@@ -182,6 +174,7 @@ class InferenceSchedulerEnv(gym.Env):
 
         return observation 
 
+    # New function in place of _process_observation
     def _process_observation_per_slot(self, observation):
         for i in range(0, 4 * self.num_models, 4):
             #  1. Request rate - float (normalized)
@@ -207,6 +200,6 @@ class InferenceSchedulerEnv(gym.Env):
 
     def grpc_close(self):
         self.channel.close()
-        
+
 
 
