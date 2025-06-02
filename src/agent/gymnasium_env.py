@@ -37,7 +37,7 @@ class InferenceSchedulerEnv(gym.Env):
         #     ?   1. Request rate - float (normalized)
         #     ?   2. Queue size   - float (normalized)
         #     ?   3. SLO latency in ms - float (normalized)
-        #     ?   3. SLO latency satisfaction % (normalized)
+        #     ?   4. SLO latency satisfaction % (normalized)
 
         # For each slot:
         #     ?   1. Model id deployed - one hot encoding
@@ -137,7 +137,7 @@ class InferenceSchedulerEnv(gym.Env):
         #     grpc_req.batch_deltas.append(self._get_batch_delta(batch_delta_actions[i]))
 
         # take the step in the cpp scheduler system
-        response = self.stub.Step(grpc_req)
+        response = self.stub.StepReduced(grpc_req)
 
         raw_observation = np.array(response.observation, dtype=np.float32)
         observation = self._process_observation_per_slot(raw_observation)

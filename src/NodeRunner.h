@@ -268,15 +268,33 @@ public:
             existingModelList[session_ptr->model_name] = 1;
         }
 
+        std::map<std::string, int> updated_ort_ind;
+        int ort_ind = 0;
+
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: updated_node.session_list) {
             auto model_name = session_ptr->model_name;
+            
+            // if empty skip
+            if(model_name == "EMPTY") {
+                update_ort_list.push_back({nullptr, nullptr});
+                ort_ind++;
+                continue;
+            }
+            
             // keep track of existing models
             existingModelList[model_name] = 0;
 
             // update batch tracking
             batch_for_model_update[model_name] = session_ptr->batch_size;
 
+            // check if model has already been placed in the updated ort
+            if(updated_ort_ind.find(model_name) != updated_ort_ind.end()) {
+                update_ort_list.push_back(update_ort_list[updated_ort_ind[model_name]]);
+                ort_ind++;
+                continue;
+            }
+            
             // check if model name already exists in existing sesison list
             // if it does.. use the corresponding ort runner
             // if not create new runner and add to list
@@ -292,6 +310,7 @@ public:
 
             if(existingInd != -1) {
                 update_ort_list.push_back(ort_list[existingInd]);
+                updated_ort_ind[model_name] = ort_ind;
             } else {
                 LOG_DEBUG(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
                 penalty++;
@@ -330,6 +349,8 @@ public:
                 }
                 update_ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
             }
+
+            ort_ind++;
         }
         
         for(auto [model_name, isGone]:existingModelList) {
@@ -355,6 +376,10 @@ public:
         if(_runner_thread.joinable()) {
             _runner_thread.join();
         }
+    }
+
+    std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> get_session_list() {
+        return running_node.session_list;
     }
 
     std::vector<float> get_slo_failure_persent(int num_of_schedules) {
@@ -613,6 +638,7 @@ private:
                     auto is_parallel = running_node.session_list[i].second.second;
 
                     LOG_DEBUG(_logger, "NODE RUN: Running slot: {}, with model: {}", slot_num, session_ptr->model_name);
+                    if(session_ptr->model_name == "EMPTY") continue;
 
                     if(is_parallel == 0) {
                         // wait for previous streams to complete

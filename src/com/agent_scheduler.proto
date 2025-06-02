@@ -40,4 +40,5 @@ message StepResponse {
 service SchedulerSim {
     rpc Reset(ResetRequest) returns (ResetResponse);
     rpc Step(StepRequest) returns (StepResponse);
+    rpc StepReduced(StepRequestReduced) returns (StepResponse);
 }

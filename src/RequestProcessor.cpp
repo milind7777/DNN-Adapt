@@ -10,6 +10,10 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     // get request count
     int request_count = req->request_count;
 
+    _lock_size.lock();
+    queue_size += request_count;
+    _lock_size.unlock();
+
     // recording request rate
     auto now = std::chrono::high_resolution_clock::now();
     long current_second = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -161,6 +165,9 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     }
     
     if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: stale: {}, queue size: {}", stale_req, get_size());
+    _lock_size.lock();
+    queue_size -= batch_cur;
+    _lock_size.unlock();
     return BatchInfo(batch_cur, stale_req, batch_timing_info);
 }
 
@@ -196,5 +203,10 @@ void RequestProcessor::clear_queue() {
     _lock_batch.lock();
     buffer = nullptr;
     queue = moodycamel::ConcurrentQueue<std::shared_ptr<InferenceRequest>>();
+    queue_size = 0;
     _lock_batch.unlock();
+}
+
+int RequestProcessor::get_queue_size() {
+    return queue_size;
 }

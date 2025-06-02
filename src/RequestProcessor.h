@@ -46,7 +46,9 @@ private:
     std::string model_name;
     double latency_slo; // in ms
     int _id = 0;
+    int queue_size = 0;
     std::mutex _lock_batch;
+    std::mutex _lock_size;
     std::shared_ptr<spdlog::logger> _logger;
 
     static std::map<std::string, std::map<std::string, std::vector<double>>> model_profiles;
@@ -63,6 +65,7 @@ public:
     void register_request(std::shared_ptr<InferenceRequest> req);
     BatchInfo form_batch(int batch_size, int gpu_id);
     size_t get_size() const;
+    int get_queue_size();
     double get_request_rate();
     void clear_queue();
     float discardStale();
