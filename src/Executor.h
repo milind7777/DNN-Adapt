@@ -127,7 +127,7 @@ public:
         // 2. Queue Size - float (normalized)
         std::vector<int> queue_sizes;
         for(const auto &[_, processor]:_requestProcessorList) {
-            req_rates.push_back(processor->get_queue_size());
+            queue_sizes.push_back(processor->get_queue_size());
         }
 
         // 3. SLO latency in ms - float (normalized)

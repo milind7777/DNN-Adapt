@@ -126,7 +126,7 @@ class InferenceSchedulerEnv(gym.Env):
         entry.batch_delta = self._get_batch_delta(action[2])
         entry.in_parallel = action[3]
 
-        grpc_req.slot_entry = entry
+        grpc_req.slot_entry.CopyFrom(entry)
 
         # take the step in the cpp scheduler system
         response = self.stub.StepReduced(grpc_req)
