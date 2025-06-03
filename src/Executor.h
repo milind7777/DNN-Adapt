@@ -138,16 +138,21 @@ public:
 
         // 4. SLO latency satisfaction % - array of [float] of size num_gpus (normalized)
         LOG_DEBUG(_logger, "Fetching slo rates");
-        std::vector<std::vector<float>> slo_rate_per_gpu;
+        int m = _modelsList.size();
+        std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
         for(auto runner:_nodeRunnersList) {
-            slo_rate_per_gpu.push_back(runner->get_slo_failure_persent(3));
+            auto count = runner->get_slo_total(1);
+            for(int i=0;i<count.size();i++) {
+                slo_total[i].first += count[i].first;
+                slo_total[i].second += count[i].second;
+            }
         }
 
-        std::vector<float> slo_rate(slo_rate_per_gpu[0].size(), 0);
-        for(int i=0;i<slo_rate.size();i++) {
-            for(int j=0;j<slo_rate_per_gpu.size();j++) {
-                slo_rate[i] = slo_rate_per_gpu[j][i];
-            } slo_rate[i] /= (float)slo_rate_per_gpu.size();
+        std::vector<float> slo_rate(m, 0);
+        for(int i=0;i<m;i++) {
+            float slo_fail_total = slo_total[i].first;
+            float slo_cnt_total = slo_total[i].first + slo_total[i].second;
+            if(slo_cnt_total > 0) slo_rate[i] += slo_fail_total / slo_cnt_total;
         }
 
         // get slot information of all gpus
@@ -186,6 +191,12 @@ public:
         return observation;
     }
 
+    void reset_slo() {
+        for(auto runner:_nodeRunnersList) {
+            runner->reset_slo();
+        }
+    }
+
     std::vector<float> get_reward(int num_schedules) {
         // Reward = - alpha * slo failure rate
         //          - beta  * num of GPUs
@@ -201,7 +212,7 @@ public:
         int m = _modelsList.size();
         std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
         for(auto runner:_nodeRunnersList) {
-            auto count = runner->get_slo_total(3);
+            auto count = runner->get_slo_total(1);
             for(int i=0;i<count.size();i++) {
                 slo_total[i].first += count[i].first;
                 slo_total[i].second += count[i].second;

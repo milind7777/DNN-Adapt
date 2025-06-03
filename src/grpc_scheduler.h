@@ -96,7 +96,10 @@ public:
         _executor->update_schedule_per_slot(request);
         LOG_DEBUG(_logger, "Finished executor update call");
 
-        // wait for 1 second for state to update
+        // reset slo count for next step
+        _executor->reset_slo();
+
+        // wait for 1-3 second for state to update (based on slo times set)
         std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 
         // get observation after step

@@ -494,6 +494,12 @@ public:
         return peak_mem_per_schedule;
     }
 
+    void reset_slo() {
+        _reset.lock();
+        pendingReset = true;
+        _reset.unlock();
+    }
+
     ~NodeRunner() {
         if (_runner_thread.joinable()) {
             _runner_thread.join();  // or _runner_thread.detach() if appropriate
@@ -504,7 +510,9 @@ public:
 
 private:
     std::mutex _update;
+    std::mutex _reset;
     bool pendingUpdate;
+    bool pendingReset;
     Node update_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> update_ort_list;
     std::map<std::string, std::string> modelsList;
@@ -731,11 +739,20 @@ private:
                 auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
                 int stale_count = processor->form_batch(0, gpu_id)._stale_req_count;
                 stat.first += stale_count;
-                slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
 
                 if(stale_count > 0) LOG_DEBUG(_logger, "NODE RUN: Discarded {} stale reqs for {}", stale_count, model_name); 
             }
             
+            // check if reset is pending
+            if(pendingReset) {
+                _reset.lock();
+                pendingReset = false;
+                for(auto [model_name,_]:request_processors) {
+                    slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
+                }
+                _reset.unlock();
+            }
+
             // check if update is needded
             if(pendingUpdate) {
                 _update.lock();
