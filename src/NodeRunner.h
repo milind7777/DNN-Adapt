@@ -748,6 +748,7 @@ private:
                 _reset.lock();
                 pendingReset = false;
                 for(auto [model_name,_]:request_processors) {
+                    slo_total_per_model[model_name][slo_total_ind[model_name]] = {0, 0};
                     slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
                 }
                 _reset.unlock();
