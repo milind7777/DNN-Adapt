@@ -176,24 +176,35 @@ class InferenceSchedulerEnv(gym.Env):
 
     # New function in place of _process_observation
     def _process_observation_per_slot(self, observation):
+        # Process model features (4 features per model)
         for i in range(0, 4 * self.num_models, 4):
             #  1. Request rate - float (normalized)
-            observation[i] /= self.max_request_rate
+            observation[i] = min(observation[i] / self.max_request_rate, 1.0)
             
             #  2. Queue size   - float (normalized)
-            observation[i+1] /= self.max_queue_size
+            observation[i+1] = min(observation[i+1] / self.max_queue_size, 1.0)
 
             #  3. SLO latency in ms - float (normalized)
-            observation[i+2] /= self.max_slo_latency
+            observation[i+2] = min(observation[i+2] / self.max_slo_latency, 1.0)
 
             #  4. SLO latency satisfaction % (normalized)
-            observation[i+3] /= self.max_slo_rate
+            observation[i+3] = min(observation[i+3] / self.max_slo_rate, 1.0)
         
-        for i in range(4 * self.num_models, self.model_feature_dim, self.num_models + 1 + 2):
-            #  1. Model id deployed - one hot encoding
-            #  2. Batch size - float (normalized)
-            observation[i+self.num_models+1] /= self.max_batch_size
-            #  3. In parallel - bool
+        # Process slot features - iterate through each slot correctly
+        slot_start_idx = 4 * self.num_models
+        features_per_slot = self.num_models + 1 + 2  # one-hot (including empty) + batch_size + in_parallel
+        total_slots = self.num_gpus * self.scheduler_slots
+        
+        for slot_idx in range(total_slots):
+            base_idx = slot_start_idx + slot_idx * features_per_slot
+            
+            # Skip model one-hot encoding (first num_models + 1 elements)
+            # Normalize batch size (at position num_models + 1 after base_idx)
+            batch_size_idx = base_idx + self.num_models + 1
+            if batch_size_idx < len(observation):
+                observation[batch_size_idx] = min(observation[batch_size_idx] / self.max_batch_size, 1.0)
+            
+            # Skip in_parallel boolean (no normalization needed)
 
         return observation
 
