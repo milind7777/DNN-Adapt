@@ -417,13 +417,13 @@ public:
         std::vector<std::pair<float, float>> stats_total;
         _lock_stats.lock();
         for(auto [model_name, total]:slo_total_per_model) {
-            auto ind = (slo_total_ind[model_name] - 1 + slo_total_size) % slo_total_size;
-            std::pair<float, float> val = {0.0f, 0.0f};
-            for(int j=0;j<num_of_schedules;j++) {
-                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
-                val.first += total[ref_ind].first;
-                val.second += total[ref_ind].second;
-            }
+            auto ind = slo_total_ind[model_name];
+            std::pair<float, float> val = {total[ind].first, total[ind].second};
+            // for(int j=0;j<num_of_schedules;j++) {
+            //     auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+            //     val.first += total[ref_ind].first;
+            //     val.second += total[ref_ind].second;
+            // }
 
             stats_total.push_back(val);
         }
