@@ -161,7 +161,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     }
     
     _lock_size.lock();
-    queue_size -= batch_cur;
+    queue_size -= (batch_cur + stale_req);
     _lock_size.unlock();
     return BatchInfo(batch_cur, stale_req, batch_timing_info);
 }
