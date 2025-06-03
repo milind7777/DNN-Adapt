@@ -260,7 +260,9 @@ public:
     }
 
     void updateNode(Node updated_node) {
+        LOG_DEBUG(_logger, "Waiting for lock");
         _update.lock();
+        LOG_DEBUG(_logger, "Lock acquired");
         int penalty = 0;
 
         for(auto [model_name, _]:modelsList) {
@@ -353,6 +355,7 @@ public:
                     std::terminate();
                 }
                 update_ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
+                updated_ort_ind[model_name] = ort_ind;
             }
 
             ort_ind++;
@@ -366,6 +369,7 @@ public:
 
         update_node = updated_node;
         pendingUpdate = true;
+        LOG_DEBUG(_logger, "Update DONE");
         _update.unlock();
     }
 
@@ -625,9 +629,12 @@ private:
             _schedule_running = true;
             std::thread monitor(&NodeRunner::monitor_total_gpu_usage, this);
 
+            // track if node is empty
+            bool is_empty = true;
+
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
-                LOG_DEBUG(_logger, "NODE RUN: Found node with number of session: {}", running_node.session_list.size());
+                // LOG_DEBUG(_logger, "NODE RUN: Found node with number of session: {}", running_node.session_list.size());
                 // LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
                 
                 // keep track of active streams to enable parallel execution
@@ -642,8 +649,12 @@ private:
                     auto occ_ratio = running_node.session_list[i].second.first;
                     auto is_parallel = running_node.session_list[i].second.second;
 
-                    LOG_DEBUG(_logger, "NODE RUN: Running slot: {}, with model: {}", slot_num, session_ptr->model_name);
-                    if(session_ptr->model_name == "EMPTY") continue;
+                    if(session_ptr->model_name == "EMPTY") {
+                        slot_num++;
+                        continue;
+                    }
+
+                    is_empty = false;
 
                     if(is_parallel == 0) {
                         // wait for previous streams to complete
@@ -671,6 +682,7 @@ private:
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
                     if(batch_current>0) {
+                        LOG_DEBUG(_logger, "NODE RUN: Running slot: {}, with model: {} and batch: {}", slot_num, session_ptr->model_name, batch_current);
                         ort_ptr->run_inference(batch_current);
 
                         // add logging callback
@@ -706,6 +718,10 @@ private:
                 LOG_DEBUG(_logger, "NODE RUN: Pause for 100ms when node is empty");
                 std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
             }
+
+            if(is_empty) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             
             // stop monitoring thread
             _schedule_running = false;
@@ -713,9 +729,11 @@ private:
             // check on all request queues
             for(auto [model_name, processor]:request_processors) {
                 auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
-                LOG_DEBUG(_logger, "NODE RUN: Calling form batch with batch size 0 for {}", model_name); 
-                stat.first += processor->form_batch(0, gpu_id)._stale_req_count;
+                int stale_count = processor->form_batch(0, gpu_id)._stale_req_count;
+                stat.first += stale_count;
                 slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
+
+                if(stale_count > 0) LOG_DEBUG(_logger, "NODE RUN: Discarded {} stale reqs for {}", stale_count, model_name); 
             }
             
             // check if update is needded
@@ -737,6 +755,13 @@ private:
                     update_ort_list.clear();
                     LOG_DEBUG(_logger, "Releasing lock after update finished, new list size is {}", ort_list.size());
                 _update.unlock();
+
+                LOG_DEBUG(_logger, "Schedule after update is: ");
+                for(int i=0;i<running_node.session_list.size();i++) {
+                    auto session_ptr = running_node.session_list[i].first;
+                    bool is_runner = (ort_list[i].first == nullptr) ? false:true;
+                    LOG_DEBUG(_logger, "Slot: {}, Model: {}, ORTRunner: {}", i, session_ptr->model_name, is_runner);
+                }
             }
 
             // join the monitor thread

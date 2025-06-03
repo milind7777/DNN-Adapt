@@ -87,9 +87,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     std::vector<std::pair<int, int64_t>> batch_timing_info;
     
     // acquire lock to prevent parallel batch forming
-    LOG_DEBUG(_logger, "WAITING TO ACQUIRE LOCK");
     _lock_batch.lock();
-    if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: form batch with batch 0");
 
     // get current time
     auto now = std::chrono::high_resolution_clock::now();
@@ -105,7 +103,6 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     if(buffer != nullptr) {
         // discard buffer is stale
         auto request_slo_time = buffer->arrival_time + (int64_t)(latency_slo * 1000);
-        if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: buffer not null: {}, {}", est_process_time, request_slo_time);
         if(est_process_time > request_slo_time) {
             LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             stale_req += buffer->request_count;
@@ -134,7 +131,6 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         if(queue.try_dequeue(request)) {
             // discard stale requests
             auto request_slo_time = request->arrival_time + (int64_t)(latency_slo * 1000);
-            if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: trying from request queue: {}, {}", est_process_time, request_slo_time);
             if(est_process_time >= request_slo_time) {
                 LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, request->request_count, time_now);
                 stale_req += request->request_count;
@@ -164,7 +160,6 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         }
     }
     
-    if(batch_size == 0) LOG_DEBUG(_logger, "BATCH 0: stale: {}, queue size: {}", stale_req, get_size());
     _lock_size.lock();
     queue_size -= batch_cur;
     _lock_size.unlock();

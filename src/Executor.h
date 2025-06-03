@@ -213,7 +213,7 @@ public:
             float slo_fail_total = slo_total[i].first;
             float slo_cnt_total = slo_total[i].first + slo_total[i].second;
             if(slo_cnt_total > 0) slo_penalty += slo_fail_total / slo_cnt_total;
-            LOG_DEBUG(_logger, "SLO LOGGING: {}, fail: {}, success{}", i, slo_fail_total, slo_cnt_total);
+            LOG_DEBUG(_logger, "SLO LOGGING: {}, fail: {}, success: {}", id_to_model[i], slo_fail_total, slo_cnt_total);
         } slo_penalty /= m;
 
         // float slo_penalty = 0;
@@ -273,6 +273,9 @@ public:
         int batch_delta = entry.batch_delta();
         bool in_parallel = entry.in_parallel();
 
+        LOG_DEBUG(_logger, "LOG: {}, {}, {}, {}", slot_id, model_id, batch_delta, in_parallel);
+        _logger->flush();
+
         int num_gpus = _gpuList.size();
         int slot_per_gpu = SLOTS_PER_GPU;
 
@@ -282,14 +285,21 @@ public:
             return;
         }
 
-        int gpu_id = slot_id / num_gpus;
-        int slot_num = slot_id % num_gpus;
+        int gpu_id = slot_id / slot_per_gpu;
+        int slot_num = slot_id % slot_per_gpu;
         auto session_list = _nodeRunnersList[gpu_id]->get_session_list();
 
         std::string cur_model = session_list[slot_num].first->model_name;
         std::string new_model = id_to_model[model_id];
 
+        LOG_DEBUG(_logger, "LOG: before if");
+        _logger->flush();
+
         if(cur_model == new_model) {
+            LOG_DEBUG(_logger, "LOG: in if: {}", cur_model);
+            _logger->flush();
+
+
             if(cur_model == "EMPTY") return;
 
             // simply update the batch size in session list
@@ -301,6 +311,8 @@ public:
                 session_list[slot_num].second.second = in_parallel;
             }    
         } else {
+            LOG_DEBUG(_logger, "LOG: in else: {}, {}", cur_model, new_model);
+            _logger->flush();
             if(new_model == "EMPTY") {
                 session_list[slot_num].first = std::make_shared<Session> ("EMPTY", 0, 0, 0);
             } else {
@@ -315,6 +327,7 @@ public:
         }
 
         Node new_node(session_list);
+        LOG_DEBUG(_logger, "Calling update node on Node Runner\n");
         _nodeRunnersList[gpu_id]->updateNode(new_node);
     }
 

@@ -94,6 +94,7 @@ public:
         _logger->flush();
         // update schedule in system
         _executor->update_schedule_per_slot(request);
+        LOG_DEBUG(_logger, "Finished executor update call");
 
         // wait for 1 second for state to update
         std::this_thread::sleep_for(std::chrono::milliseconds(3000));
