@@ -104,6 +104,9 @@ public:
         for(auto runner:_nodeRunnersList) {
             runner->start();
         }
+
+        // wait for some time for nodes to update
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     void stopSimulation() {
@@ -220,16 +223,16 @@ public:
         }
 
         float slo_penalty_fail = 0;
-        float slo_pentaly_total = 0;
+        float slo_penalty_total = 0;
         for(int i=0;i<m;i++) {
             float slo_fail_total = slo_total[i].first;
             float slo_cnt_total = slo_total[i].first + slo_total[i].second;
-            slo_penalty_fail += slo_fail_total 
+            slo_penalty_fail += slo_fail_total;
             slo_penalty_total += slo_cnt_total;
             LOG_DEBUG(_logger, "SLO LOGGING: {}, fail: {}, total: {}", id_to_model[i], slo_fail_total, slo_cnt_total);
         } 
         
-        slo_penalty = 0;
+        float slo_penalty = 0;
         if(slo_penalty_total > 0) slo_penalty = (slo_penalty_fail) / (slo_penalty_total);
 
         // float slo_penalty = 0;
