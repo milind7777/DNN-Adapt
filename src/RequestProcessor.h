@@ -46,7 +46,7 @@ private:
     std::string model_name;
     double latency_slo; // in ms
     int _id = 0;
-    int queue_size = 0;
+    std::atomic<int> queue_size = 0;
     std::mutex _lock_batch;
     std::mutex _lock_size;
     std::shared_ptr<spdlog::logger> _logger;

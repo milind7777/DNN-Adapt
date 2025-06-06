@@ -275,8 +275,8 @@ public:
             slot_switch_penalty += runner->get_slot_switch_penalty();
         } slot_switch_penalty /= _gpuList.size();
 
-        float mask = 1;
-        if(slo_penalty >= .05) mask = 0;
+        float mask = 1 - slo_penalty;
+        // if(slo_penalty >= .05) mask = 0;
 
         std::vector<float> reward = { alpha * (1 - slo_penalty), beta * (1 - gpu_count) * mask, gamma * (1 - batch_fill_penalty) * mask, omega * (1 - slot_switch_penalty) * mask};
         return reward;

@@ -9,11 +9,7 @@
 void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     // get request count
     int request_count = req->request_count;
-
-    _lock_size.lock();
-    queue_size += request_count;
-    _lock_size.unlock();
-
+    
     // recording request rate
     auto now = std::chrono::high_resolution_clock::now();
     long current_second = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -40,7 +36,11 @@ void RequestProcessor::register_request(std::shared_ptr<InferenceRequest> req) {
     request_copy->arrival_time = std::chrono::duration_cast<std::chrono::microseconds>(
         now.time_since_epoch()
     ).count();
+
+    _lock_batch.lock();
+    queue_size += request_count;
     queue.enqueue(request_copy);
+    _lock_batch.unlock();
 }
 
 std::vector<double> loadCSVFile(const std::string &filePath, const std::string column) {
@@ -103,6 +103,9 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     if(buffer != nullptr) {
         // discard buffer is stale
         auto request_slo_time = buffer->arrival_time + (int64_t)(latency_slo * 1000);
+        // if(batch_size == 0) {
+        //     LOG_DEBUG(_logger, "YOYO: {}, {}", est_process_time, request_slo_time);
+        // }
         if(est_process_time > request_slo_time) {
             LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, buffer->request_count, time_now);
             stale_req += buffer->request_count;
@@ -126,7 +129,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
     }
 
     // try to form from the request queue
-    while(batch_cur <= batch_size) {
+    while(batch_cur < batch_size) {
         std::shared_ptr<InferenceRequest> request;
         if(queue.try_dequeue(request)) {
             // discard stale requests
@@ -149,6 +152,28 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         batch_cur = batch_size;
     }
     
+    if(batch_size == 0) {
+        while(buffer == nullptr) {
+            std::shared_ptr<InferenceRequest> request;
+            if(queue.try_dequeue(request)) {
+                // discard stale requests
+                auto request_slo_time = request->arrival_time + (int64_t)(latency_slo * 1000);
+                
+                // LOG_DEBUG(_logger, "YOYO: {}, {}", est_process_time, request_slo_time);
+        
+                if(est_process_time >= request_slo_time) {
+                    LOG_WARN(_logger, "SLO VIOLATED: model_name:{} request_count:{} time_now:{}", model_name, request->request_count, time_now);
+                    stale_req += request->request_count;
+                } else {
+                    last_request_arrival_time = request->arrival_time;
+                    buffer = std::make_shared<InferenceRequest>(model_name, request->request_count, last_request_arrival_time);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
     // release lock
     _lock_batch.unlock();
 
@@ -160,9 +185,7 @@ BatchInfo RequestProcessor::form_batch(int batch_size, int gpu_id) {
         }
     }
     
-    _lock_size.lock();
     queue_size -= (batch_cur + stale_req);
-    _lock_size.unlock();
     return BatchInfo(batch_cur, stale_req, batch_timing_info);
 }
 

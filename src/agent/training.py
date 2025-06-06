@@ -10,6 +10,19 @@ from gymnasium.wrappers import RecordEpisodeStatistics
 from gymnasium_env import InferenceSchedulerEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
 
+class EntropyDecayCallback(BaseCallback):
+    def __init__(self, initial_ent_coef=0.01, final_ent_coef=0.0, total_timesteps=1e5, verbose=0):
+        super().__init__(verbose)
+        self.initial_ent_coef = initial_ent_coef
+        self.final_ent_coef = final_ent_coef
+        self.total_timesteps = total_timesteps
+
+    def _on_step(self) -> bool:
+        progress = self.num_timesteps / self.total_timesteps
+        new_ent_coef = self.initial_ent_coef * (1 - progress) + self.final_ent_coef * progress
+        self.model.ent_coef = new_ent_coef
+        return True
+
 class SchedulerEpisodeCallback(BaseCallback):
     def __init__(self, num_gpus=2, num_models=3, scheduler_slots=3, 
                  log_file="scheduler_episodes.json", 
@@ -587,8 +600,10 @@ def main():
         env, 
         verbose=1, 
         device='cpu', 
-        n_steps=60, 
-        batch_size=20,
+        n_steps=100,
+        n_epochs=5,
+        batch_size=50,
+        learning_rate=3e-4, 
         tensorboard_log="./tb_logs"
     )
 
@@ -604,6 +619,12 @@ def main():
         verbose=1
     )    
     
+    entropy_callback = EntropyDecayCallback(
+        initial_ent_coef=0.01, 
+        final_ent_coef=0.0, 
+        total_timesteps=14400
+    )
+
     # Clear pretty log file at starts
     with open("scheduler_pretty.log", 'w') as f:
         f.write(f"SCHEDULER TRAINING LOG - {datetime.now().isoformat()}\n")
@@ -615,7 +636,7 @@ def main():
     )
 
     print("Starting training...")
-    model.learn(total_timesteps=14400, callback=[callback, checkpoint_callback])
+    model.learn(total_timesteps=14400, callback=[callback, checkpoint_callback, entropy_callback])
 
     # Print final statistics
     print("\n" + "="*60)

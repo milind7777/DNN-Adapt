@@ -5,6 +5,7 @@
 
 // The second level granularity for the request rate simulator
 double QUANTIZATION_INTERVAL = 0.5;
+double episode_count = 0;
 
 /*
     Dynamic request rate simulator
@@ -116,32 +117,51 @@ void Simulator::run(int seed) {
     
     schedules["efficientnetb0"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {125, {1}}}
+        {rate_type::flat, {70, {1}}}
         // {rate_type::ramp, {5, {-10}}}
     };
 
     schedules["resnet18"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {125, {1}}}
+        {rate_type::flat, {70, {1}}}
         // {rate_type::flat, {40, {10}}},
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     schedules["vit16"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {115, {1}}}
+        {rate_type::flat, {70, {1}}}
         // {rate_type::flat, {30, {10}}},
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     int min = 0;
-    int max = 50;
-    schedules["efficientnetb0"][1].second.second[0] *= max;
-    schedules["resnet18"][1].second.second[0] *= max;
-    schedules["vit16"][1].second.second[0] *= max;
-    // schedules["efficientnetb0"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
-    // schedules["resnet18"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
-    // schedules["vit16"][1].second.second[0] *= (std::rand() % (max - min + 1)) + min;
+    int max = 75;
+
+    episode_count++;
+    int rate;
+    if(episode_count <= 25) {
+        schedules["efficientnetb0"][1].second.second[0] = 25;
+        schedules["resnet18"][1].second.second[0] = 0;
+        schedules["vit16"][1].second.second[0] = 0;
+    } else if(episode_count <= 50) {
+        schedules["efficientnetb0"][1].second.second[0] = 0;
+        schedules["resnet18"][1].second.second[0] = 25;
+        schedules["vit16"][1].second.second[0] = 0;
+    } else if (episode_count <= 75) {
+        schedules["efficientnetb0"][1].second.second[0] = 0;
+        schedules["resnet18"][1].second.second[0] = 0;
+        schedules["vit16"][1].second.second[0] = 25;
+    } else if(episode_count <= 200) {
+        schedules["efficientnetb0"][1].second.second[0] = 25;
+        schedules["resnet18"][1].second.second[0] = 25;
+        schedules["vit16"][1].second.second[0] = 25;
+    } else {
+        // choose constant random rates for all models
+        schedules["efficientnetb0"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+        schedules["resnet18"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+        schedules["vit16"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    }
 
     // reset flags
     stop_flag = false;
