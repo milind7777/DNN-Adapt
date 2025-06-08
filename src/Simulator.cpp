@@ -117,51 +117,80 @@ void Simulator::run(int seed) {
     
     schedules["efficientnetb0"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {70, {1}}}
-        // {rate_type::ramp, {5, {-10}}}
+        {rate_type::ramp, {25, {2}}},
+        {rate_type::flat, {160, {50}}}
     };
 
     schedules["resnet18"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {70, {1}}}
-        // {rate_type::flat, {40, {10}}},
+        {rate_type::ramp, {25, {2}}},
+        {rate_type::flat, {160, {50}}}
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     schedules["vit16"] = {
         {rate_type::flat, {5, {0}}},
-        {rate_type::flat, {70, {1}}}
+        {rate_type::ramp, {25, {4}}},
+        {rate_type::flat, {160, {100}}}
         // {rate_type::flat, {30, {10}}},
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
-    int min = 0;
-    int max = 75;
+    // int min = 0;
+    // int max = 100;
 
-    episode_count++;
-    int rate;
-    if(episode_count <= 25) {
-        schedules["efficientnetb0"][1].second.second[0] = 25;
-        schedules["resnet18"][1].second.second[0] = 0;
-        schedules["vit16"][1].second.second[0] = 0;
-    } else if(episode_count <= 50) {
-        schedules["efficientnetb0"][1].second.second[0] = 0;
-        schedules["resnet18"][1].second.second[0] = 25;
-        schedules["vit16"][1].second.second[0] = 0;
-    } else if (episode_count <= 75) {
-        schedules["efficientnetb0"][1].second.second[0] = 0;
-        schedules["resnet18"][1].second.second[0] = 0;
-        schedules["vit16"][1].second.second[0] = 25;
-    } else if(episode_count <= 200) {
-        schedules["efficientnetb0"][1].second.second[0] = 25;
-        schedules["resnet18"][1].second.second[0] = 25;
-        schedules["vit16"][1].second.second[0] = 25;
-    } else {
-        // choose constant random rates for all models
-        schedules["efficientnetb0"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
-        schedules["resnet18"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
-        schedules["vit16"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
-    }
+    // episode_count++;
+    // int rate;
+    // if(episode_count <= 15) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 25;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 30) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 50;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 50) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 75;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 65) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 25;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 80) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 50;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 100) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 75;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 115) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 25;
+    // } else if(episode_count <= 130) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 50;
+    // } else if(episode_count <= 150) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 75;
+    // } else if (episode_count <= 200) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 25;
+    //     schedules["resnet18"][1].second.second[0] = 25;
+    //     schedules["vit16"][1].second.second[0] = 25;
+    // } else if(episode_count <= 300) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 50;
+    //     schedules["resnet18"][1].second.second[0] = 50;
+    //     schedules["vit16"][1].second.second[0] = 50;
+    // } else {
+    //     // choose constant random rates for all models
+    //     schedules["efficientnetb0"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    //     schedules["resnet18"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    //     schedules["vit16"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    // }
 
     // reset flags
     stop_flag = false;

@@ -77,13 +77,15 @@ int main(int argc, char * argv[]) {
         {"model_repo", required_argument, nullptr, 'm'},
         {"run_name", required_argument, nullptr, 'r'},
         {"profile", no_argument, nullptr, 'p'},
+        {"mode", required_argument, nullptr, 'o'},
         {0, 0, 0, 0}
     };
     
     int opt;
     std::string model_dir = "";
     std::string run_name = "";
-    while((opt = getopt_long_only(argc, argv, "m:r:p:", long_options, &option_index)) != -1) {
+    std::string run_mode = "";
+    while((opt = getopt_long_only(argc, argv, "m:r:p:o:", long_options, &option_index)) != -1) {
         switch(opt) {
             case 'm':
                 model_dir = optarg;
@@ -94,10 +96,24 @@ int main(int argc, char * argv[]) {
             case 'p':
                 run_profiling();
                 return 0;
+            case 'o':
+                run_mode = optarg;
+                break;
             default:
                 std::cerr << "Usage: " << argv[0] << " --model_repo <dir> --run_name <name>\n";
                 exit(1);
         }
+    }
+
+    std::map<std::string, bool> allowed_modes = {
+        {"nexus", true},
+        {"batch8", true},
+        {"dnn", true}
+    };
+
+    if(allowed_modes.find(run_mode) == allowed_modes.end()) {
+        std::cerr << "Error: --mode, -o is not allowed\n";
+        exit(EXIT_FAILURE);
     }
 
     if (model_dir.empty()) {
@@ -150,9 +166,9 @@ int main(int argc, char * argv[]) {
 
     // populate SLO latencies for each model in ms
     std::map<std::string, double> latencies;
-    latencies["vit16"] = 1500.0;
-    latencies["resnet18"] = 1000.0;
-    latencies["efficientnetb0"] = 1000.0;
+    latencies["vit16"] = 1000.0;
+    latencies["resnet18"] = 700.0;
+    latencies["efficientnetb0"] = 700.0;
 
     // generate mmap for image bin file
     auto mappedBin = mmap_image_bin_file("data/images/batch_input_nchw.bin");
@@ -183,10 +199,21 @@ int main(int argc, char * argv[]) {
 
     // Initialize executor
     LOG_DEBUG(logger, "Initializing executor");
-    auto executor = std::make_shared<Executor>(models, gpuList, request_processors, sim, latencies, profilingFolder);
+    auto executor = std::make_shared<Executor>(models, gpuList, request_processors, sim, latencies, profilingFolder, run_mode);
 
-    // Start grpc server
-    RunServer(executor);
+    if(run_mode == "dnn") {
+        // Start grpc server
+        SIMULATION_LEN = 60;
+        RunServer(executor);
+    } else {
+        // Reset simulators and start the episode
+        executor->reset(1);
+        executor->start();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(3 * 60 * 1000));
+        executor->stopSimulation();
+        executor->stop();
+    }
 
     LOG_DEBUG(logger, "Exiting main program");
     logger->flush();

@@ -22,8 +22,9 @@ public:
              std::map<std::string, std::shared_ptr<RequestProcessor>> &requestProcessorList,
              std::shared_ptr<Simulator> simulator,
              std::map<std::string, double> &latencies,
-             std::string profilingFolder): 
-                _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _simulator(simulator), _latencies(latencies), _profilingFolder(profilingFolder)
+             std::string profilingFolder,
+             std::string run_mode): 
+                _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _simulator(simulator), _latencies(latencies), _profilingFolder(profilingFolder), _run_mode(run_mode)
     {
         // get logger
         _logger = Logger::getInstance().getLogger("Executor");
@@ -51,6 +52,7 @@ public:
             for(int j=0;j<SLOTS_PER_GPU;j++) {
                 session_list.push_back({std::make_shared<Session> ("EMPTY", 0, 0, 0), {0, 0}});
             }
+
             auto emptyNode = std::make_shared<Node>(session_list);
             _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _modelsList, _requestProcessorList, _latencies));
         }
@@ -88,11 +90,19 @@ public:
         // clear node runners
         for(auto runner:_nodeRunnersList) {
             std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list;
-            for(int j=0;j<SLOTS_PER_GPU;j++) {
-                session_list.push_back({std::make_shared<Session> ("EMPTY", 0, 0, 0), {0, 0}});
+            if(_run_mode == "batch8") {
+                // testing base case where all models are deployed with fixed batch size
+                for(int j=0;j<SLOTS_PER_GPU;j++) {
+                    std::string model_name = id_to_model[j];
+                    session_list.push_back({std::make_shared<Session> (model_name, _latencies[model_name], 1, 8), {0, 0}});
+                }
+            } else {
+                for(int j=0;j<SLOTS_PER_GPU;j++) {
+                    session_list.push_back({std::make_shared<Session> ("EMPTY", 0, 0, 0), {0, 0}});
+                }
             }
+            
             Node emptyNode = Node(session_list);
-
             runner->updateNode(emptyNode);
         }
 
@@ -282,8 +292,45 @@ public:
         return reward;
     }
 
+    std::pair<std::map<std::string, bool>, std::vector<int>> get_cur_model_list() {
+        std::map<std::string, bool> cur_model = {
+            {"vit16", false},
+            {"resnet18", false},
+            {"efficientnetb0", false}
+        };
+        std::vector<int> free_slot_list; int slot_num = 0;
+        for(auto node:_nodeRunnersList) {
+            auto session_list = node->get_session_list();
+            for(auto [session_ptr, _]:session_list) {
+                cur_model[session_ptr->model_name] = true;
+
+                if(session_ptr->model_name == "EMPTY") {
+                    free_slot_list.push_back(slot_num);
+                }
+
+                slot_num++;
+            }
+        }
+
+        return {cur_model, free_slot_list};
+    }
+
+    void print_current_schedule() {
+        int node_num = 0;
+        for(auto node:_nodeRunnersList) {
+            LOG_DEBUG(_logger, "GPU {}", node_num++);
+            auto session_list = node->get_session_list();
+            int slot_num = 0;
+            for(auto [session_ptr,_]:session_list) {
+                LOG_DEBUG(_logger, "{}. {}, {}", slot_num++, session_ptr->model_name, session_ptr->batch_size);
+            }
+        }
+    }
+
     int step_count = 0;
     void update_schedule_per_slot(const StepRequestReduced* request) {
+        print_current_schedule();
+
         step_count++;
         auto& entry = request->slot_entry();
 
@@ -342,6 +389,26 @@ public:
                     session_list[slot_num].first = std::make_shared<Session> (new_model, 0, 0, new_batch_size);
                     session_list[slot_num].second.second = in_parallel;
                 }  
+            }
+        }
+
+        // additional check for safety - If the request rate for the model in non-zero, then put 
+        // the model with batch size 8 in the frist free slot
+        auto return_val = get_cur_model_list();
+        auto cur_model_list = return_val.first;
+        auto free_slot_list = return_val.second; int ind = 0;
+
+        for(auto [model_name, processor]:_requestProcessorList) {
+            auto request_rate = processor->get_request_rate();
+            if(request_rate > 0 and cur_model_list[model_name] == false) {
+                int slot_num = free_slot_list[ind++];
+                int cgpu_id = slot_num / slot_per_gpu;
+
+                if(cgpu_id == gpu_id) {
+                    int s_num = slot_num % slot_per_gpu;
+                    session_list[s_num].first = std::make_shared<Session> (model_name, 0, 0, 8);
+                    LOG_DEBUG(_logger, "Putting model {} in free slot {} on gpu {} with batch size 8", model_name, s_num, gpu_id);
+                }
             }
         }
 
@@ -437,8 +504,9 @@ private:
     std::vector<std::string> id_to_model;
     std::map<std::string, int> model_to_id;
     bool _running = false;
-    const int _interval = 5; // in seconds
+    const int _interval = 2; // in seconds
     std::shared_ptr<spdlog::logger> _logger;
+    std::string _run_mode;
 
     std::map<std::string, double> _model_slos_us; // SLO thresholds in microseconds
     double _default_slo_us = 10000.0; // Default SLO threshold
@@ -486,31 +554,34 @@ private:
         // query request processors at given frequency to update schedule
         while(true) {
             if(!_running) break;
+            print_current_schedule();
             
-            // get session list by querying request processors
-            LOG_DEBUG(_logger, "Querying request processors");
-            auto sessionList = generate_sessions();
+            if(_run_mode != "batch8") {
+                // get session list by querying request processors
+                LOG_DEBUG(_logger, "Querying request processors");
+                auto sessionList = generate_sessions();
 
-            // generate new shcedule
-            auto nodeList = _scheduler->generate_schedule(sessionList);
+                // generate new shcedule
+                auto nodeList = _scheduler->generate_schedule(sessionList);
 
-            // check to make sure we are not using more than allowed GPUs
-            if (nodeList.size() > _gpuList.size()) {
-                std::cerr << "Assertion failed: nodeList.size() (" << nodeList.size()
-                          << ") > _gpuList.size() (" << _gpuList.size() << ")" << std::endl;
-                assert(false);
-            }          
+                // check to make sure we are not using more than allowed GPUs
+                if (nodeList.size() > _gpuList.size()) {
+                    std::cerr << "Assertion failed: nodeList.size() (" << nodeList.size()
+                            << ") > _gpuList.size() (" << _gpuList.size() << ")" << std::endl;
+                    assert(false);
+                }          
 
-            /* // hack to test parallel execution on gpu streams
-            if(nodeList.size() > 0) {
-                for(int i=0;i<nodeList[0]->session_list.size();i++) {
-                    nodeList[0]->session_list[i].second.second = 1;
+                /* // hack to test parallel execution on gpu streams
+                if(nodeList.size() > 0) {
+                    for(int i=0;i<nodeList[0]->session_list.size();i++) {
+                        nodeList[0]->session_list[i].second.second = 1;
+                    }
+                } */
+
+                // update NodeRunners with new schedule
+                for(int i=0;i<nodeList.size();i++) {
+                    _nodeRunnersList[i]->updateNode(*nodeList[i]);
                 }
-            } */
-
-            // update NodeRunners with new schedule
-            for(int i=0;i<nodeList.size();i++) {
-                _nodeRunnersList[i]->updateNode(*nodeList[i]);
             }
 
             // pause before repeating
