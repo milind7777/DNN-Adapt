@@ -13,14 +13,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 #  Configuration 
-LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN_ADAPT_I/logs/experiment/dnn_adapt.log'
-CSV_OUTPUT_DIR = '//home/cching1/DNNAdapt/DNN_ADAPT_I/util/csv_data_cache' # Ensure this directory exists
+LOG_FILE_PATH = '/home/mpenumat/DNN-Adapt/logs/cpp_log/dnn_adapt.log'
+CSV_OUTPUT_DIR = '/home/mpenumat/DNN-Adapt/util/csv_data_cache' # Ensure this directory exists
 MAX_HISTORY_CSV_ROWS = 5000 # For history CSVs to prevent them from growing indefinitely
 RECENT_REQUESTS_LIMIT = 200 # For recent_requests_details.csv
 
 # SLO Configuration (in microseconds)
 try:
-    with open('/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json', 'r') as f:
+    with open('/home/mpenumat/DNN-Adapt/util/slo_config.json', 'r') as f:
         slo_config = json.load(f)
     MODEL_SLOS_US = slo_config.get('model_slos_us', {})
     DEFAULT_SLO_US = slo_config.get('default_slo_us', 1000)
@@ -29,8 +29,9 @@ except Exception as e:
     logger.warning(f"Failed to load SLO configuration: {e}")
     # Fallback to hardcoded values
     MODEL_SLOS_US = {
-        "resnet18": 500,
+        "resnet18": 700,
         "vit16": 1000,
+        "efficientnetb0": 700
     }
     DEFAULT_SLO_US = 1000
     logger.info(f"Using fallback SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
