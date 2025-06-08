@@ -1,0 +1,6 @@
+model_name,request_count,processed_count,avg_processing_time_us,target_rate,slo_met_count,slo_violated_count
+efficientnetb0,6595,6221,1453558889.869732,25,6205,386
+resnet18,8032,7154,-3439389644.483202,50,7152,1015
+vit16,15925,12970,873626849.984852,100,12945,3166
+efficientnetb,0,0,0.0,56,0,0
+r,0,0,0.0,50,0,0
