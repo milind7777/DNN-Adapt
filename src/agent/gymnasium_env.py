@@ -90,7 +90,6 @@ class InferenceSchedulerEnv(gym.Env):
         schedule_entry_spec = [
             self.num_gpus * self.scheduler_slots + 1,
             self.num_models + 1,
-            10,
             2
         ]
 
@@ -115,7 +114,8 @@ class InferenceSchedulerEnv(gym.Env):
         return observation, info
 
     def _get_batch_delta(self, delta: int) -> int:
-        return delta - 4
+        delta_arr = [-4, 8]
+        return delta_arr[delta]
     
     def step(self, action):
         grpc_req = agent_scheduler_pb2.StepRequestReduced()
@@ -124,7 +124,7 @@ class InferenceSchedulerEnv(gym.Env):
         entry.slot_id = action[0]
         entry.model_id = action[1]
         entry.batch_delta = self._get_batch_delta(action[2])
-        entry.in_parallel = action[3]
+        entry.in_parallel = 0
 
         grpc_req.slot_entry.CopyFrom(entry)
 

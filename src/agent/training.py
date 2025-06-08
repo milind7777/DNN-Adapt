@@ -183,8 +183,9 @@ class SchedulerEpisodeCallback(BaseCallback):
         # Parse reduced action: [slot_id, model_id, batch_delta, in_parallel]
         action_slot_id = int(reduced_action[0]) if reduced_action[0] < self.num_gpus * self.scheduler_slots else -1
         action_model_id = int(reduced_action[1]) if reduced_action[1] < self.num_models else -1
-        batch_delta = int(reduced_action[2]) - 4  # Convert back to actual delta
-        in_parallel = bool(reduced_action[3])
+        action_delta = [-4, 8]
+        batch_delta = action_delta[(int)(reduced_action[2])]  # Convert back to actual delta
+        in_parallel = 0
         
         # Extract model data from new observation structure with bounds checking
         model_data = []

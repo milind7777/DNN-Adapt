@@ -720,7 +720,8 @@ class LogToCsvProcessor:
                             
                             del self.requests[req_id] # Clean up processed request
                         
-                del self.pending_requests[batch_id] # Clear pending for this batch
+                if batch_id in self.pending_requests:
+                    del self.pending_requests[batch_id] # Clear pending for this batch
             
                 if batch_id in self.batches: # Clean up batch info
                     del self.batches[batch_id]
@@ -730,7 +731,7 @@ class LogToCsvProcessor:
                 return
         except Exception as e:
             # Don't crash on processing errors - log and continue
-            logger.error(f"Error processing log line: {e}", exc_info=True)
+            logger.error(f"Error processing log line: {e}, {line}", exc_info=True)
 
 if __name__ == "__main__":
     try:

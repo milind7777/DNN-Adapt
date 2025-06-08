@@ -136,6 +136,30 @@ void Simulator::run(int seed) {
         // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
+    // schedules["efficientnetb0"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {2}}},
+    //     {rate_type::sinusoidal, {100, {20, 0.1}}},
+    //     {rate_type::flat, {55, {25}}}
+    // };
+
+    // schedules["resnet18"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {2}}},
+    //     {rate_type::flat, {80, {50}}},
+    //     {rate_type::burst, {5, {20, 2}}},
+    //     {rate_type::flat, {70, {50}}}
+    //     // {rate_type::exponential_decay, {20, {0.8}}}
+    // };
+
+    // schedules["vit16"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {4}}},
+    //     {rate_type::flat, {160, {100}}}
+    //     // {rate_type::flat, {30, {10}}},
+    //     // {rate_type::exponential_decay, {20, {0.8}}}
+    // };
+
     // int min = 0;
     // int max = 100;
 

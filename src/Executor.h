@@ -292,26 +292,30 @@ public:
         return reward;
     }
 
-    std::pair<std::map<std::string, bool>, std::vector<int>> get_cur_model_list() {
+    std::pair<std::map<std::string, bool>, std::vector<int>> get_cur_model_list(std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> _session_lst, int gpu_id) {
         std::map<std::string, bool> cur_model = {
             {"vit16", false},
             {"resnet18", false},
             {"efficientnetb0", false}
         };
         std::vector<int> free_slot_list; int slot_num = 0;
+        int gpu_num = 0;
         for(auto node:_nodeRunnersList) {
             auto session_list = node->get_session_list();
+            if(gpu_num == gpu_id) session_list = _session_lst;
+            gpu_num++;
             for(auto [session_ptr, _]:session_list) {
-                cur_model[session_ptr->model_name] = true;
+                auto model_name = session_ptr->model_name;
 
                 if(session_ptr->model_name == "EMPTY") {
                     free_slot_list.push_back(slot_num);
+                } else {
+                    cur_model[session_ptr->model_name] = true;
                 }
 
                 slot_num++;
             }
         }
-
         return {cur_model, free_slot_list};
     }
 
@@ -394,22 +398,43 @@ public:
 
         // additional check for safety - If the request rate for the model in non-zero, then put 
         // the model with batch size 8 in the frist free slot
-        auto return_val = get_cur_model_list();
+        LOG_DEBUG(_logger, "get cur model list");
+        auto return_val = get_cur_model_list(session_list, gpu_id);
         auto cur_model_list = return_val.first;
         auto free_slot_list = return_val.second; int ind = 0;
-
+        
+        int xgpu_id = 1;
+        if(gpu_id == 1) xgpu_id = 0;
+        LOG_DEBUG(_logger, "xgpu_id {}", xgpu_id);
+        auto xsession_list = _nodeRunnersList[xgpu_id]->get_session_list();
+        bool needs_update = false;
+        
         for(auto [model_name, processor]:_requestProcessorList) {
             auto request_rate = processor->get_request_rate();
+            LOG_DEBUG(_logger, "1: {}, {}", request_rate, model_name);
             if(request_rate > 0 and cur_model_list[model_name] == false) {
+                LOG_DEBUG(_logger, "2: {}", ind);
+                if(ind >= free_slot_list.size()) continue;
                 int slot_num = free_slot_list[ind++];
                 int cgpu_id = slot_num / slot_per_gpu;
-
+                
+                LOG_DEBUG(_logger, "slot_num {}", slot_num);
                 if(cgpu_id == gpu_id) {
                     int s_num = slot_num % slot_per_gpu;
                     session_list[s_num].first = std::make_shared<Session> (model_name, 0, 0, 8);
                     LOG_DEBUG(_logger, "Putting model {} in free slot {} on gpu {} with batch size 8", model_name, s_num, gpu_id);
+                } else {
+                    int s_num = slot_num % slot_per_gpu;
+                    needs_update = true;
+                    xsession_list[s_num].first = std::make_shared<Session> (model_name, 0, 0, 8);
+                    LOG_DEBUG(_logger, "Putting model {} in free slot {} on gpu {} with batch size 8", model_name, s_num, gpu_id);
                 }
             }
+        }
+
+        if(needs_update) {
+            Node xnew_node(xsession_list);
+            _nodeRunnersList[xgpu_id]->updateNode(xnew_node);
         }
 
         Node new_node(session_list);
