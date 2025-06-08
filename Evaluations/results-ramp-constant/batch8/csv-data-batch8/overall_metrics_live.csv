@@ -1,0 +1,2 @@
+timestamp,total_requests,processed_requests,avg_processing_time_us,recent_throughput_rps,slo_met_count,slo_violated_count
+2025-06-07T18:30:44.584263,32500,28286,623336502.2317662,0.0,28264,3190
