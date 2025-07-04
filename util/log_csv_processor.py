@@ -13,14 +13,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 #  Configuration 
-LOG_FILE_PATH = '/home/cching1/DNNAdapt/DNN-Adapt/logs/experiment/dnn_adapt.log'
-CSV_OUTPUT_DIR = '/home/cching1/DNNAdapt/DNN-Adapt/util/csv_data_cache' # Ensure this directory exists
+LOG_FILE_PATH = '/home/mpenumat/DNN-Adapt/logs/cpp_log/dnn_adapt.log'
+CSV_OUTPUT_DIR = '/home/mpenumat/DNN-Adapt/util/csv_data_cache' # Ensure this directory exists
 MAX_HISTORY_CSV_ROWS = 5000 # For history CSVs to prevent them from growing indefinitely
 RECENT_REQUESTS_LIMIT = 200 # For recent_requests_details.csv
 
 # SLO Configuration (in microseconds)
 try:
-    with open('/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json', 'r') as f:
+    with open('/home/mpenumat/DNN-Adapt/util/slo_config.json', 'r') as f:
         slo_config = json.load(f)
     MODEL_SLOS_US = slo_config.get('model_slos_us', {})
     DEFAULT_SLO_US = slo_config.get('default_slo_us', 1000)
@@ -29,8 +29,9 @@ except Exception as e:
     logger.warning(f"Failed to load SLO configuration: {e}")
     # Fallback to hardcoded values
     MODEL_SLOS_US = {
-        "resnet18": 500,
+        "resnet18": 700,
         "vit16": 1000,
+        "efficientnetb0": 700
     }
     DEFAULT_SLO_US = 1000
     logger.info(f"Using fallback SLO configuration: {MODEL_SLOS_US}, default: {DEFAULT_SLO_US}")
@@ -89,7 +90,7 @@ class LogToCsvProcessor:
         self.re_batch_processed = re.compile(r'\[CudaCallback\] \[info\] BATCH PROCESSED: (.+?) @ (\d+)')
         self.re_simulate_rate = re.compile(r'\[Simulator\] \[trace\] Simulating rate: (\d+) for model (.+)')
         # Add new regex to match SLO violation warnings 
-        self.re_slo_violation = re.compile(r'\[RequestProcessor\] \[warning\] SLO VIOLATED: model_name:(.+?) reqeust_count:(\d+) time_now:(\d+)')
+        self.re_slo_violation = re.compile(r'\[RequestProcessor\] \[warning\] SLO VIOLATED: model_name:(.+?) request_count:(\d+) time_now:(\d+)')
         # Add regex to match new REQUEST RECEIVED logs
         self.re_request_received = re.compile(r'\[RequestProcessor\] \[info\] REQUEST RECEIVED: model_name:(.+?) request_count:(\d+) time_now:(\d+)')
         
@@ -719,7 +720,8 @@ class LogToCsvProcessor:
                             
                             del self.requests[req_id] # Clean up processed request
                         
-                del self.pending_requests[batch_id] # Clear pending for this batch
+                if batch_id in self.pending_requests:
+                    del self.pending_requests[batch_id] # Clear pending for this batch
             
                 if batch_id in self.batches: # Clean up batch info
                     del self.batches[batch_id]
@@ -729,7 +731,7 @@ class LogToCsvProcessor:
                 return
         except Exception as e:
             # Don't crash on processing errors - log and continue
-            logger.error(f"Error processing log line: {e}", exc_info=True)
+            logger.error(f"Error processing log line: {e}, {line}", exc_info=True)
 
 if __name__ == "__main__":
     try:

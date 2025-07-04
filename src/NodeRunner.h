@@ -4,6 +4,7 @@
 #include "SchedulerInterface.h"
 #include "imageInput.h"
 #include "Logger.h"
+#include "RequestProcessor.h"
 #include <iostream>
 #include <string>
 #include <thread>
@@ -18,6 +19,7 @@ extern const int CHANNELS;
 extern const int HEIGHT;
 extern const int WIDTH;
 extern MappedBin gMappedImageBin;
+extern const int SLOTS_PER_GPU;
 
 #define CUDACHECK(err) do { cuda_check((err), __FILE__, __LINE__); } while(false)
 inline void cuda_check(cudaError_t error_code, const char *file, int line)
@@ -48,8 +50,6 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        //print the log level
-        
         _session_options = std::move(session_options);
         _session = Ort::Session(_env, onnx_file_path.c_str(), _session_options);
     }
@@ -65,12 +65,12 @@ public:
 
         size_t free_mem, total_mem;
         cudaMemGetInfo(&free_mem, &total_mem);
-        std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
+        // std::cout << "CUDA MEM INFO: " << free_mem << " " << total_mem << "\n";
 
         float * gpu_ptr = nullptr;
         cudaError_t cuda_err;
-        CUDACHECK(cudaMalloc((void**)&gpu_ptr, total_bytes));
-        std::cout << "CUDA MALLOC DONE" << std::endl;
+        CUDACHECK(cudaMallocAsync((void**)&gpu_ptr, total_bytes, _runner_stream));
+        // std::cout << "CUDA MALLOC DONE" << std::endl;
 
         // copy input image over to GPU memory
         assert(gpu_ptr != nullptr);
@@ -87,7 +87,7 @@ public:
                                 cudaMemcpyHostToDevice,
                                 _runner_stream
         ));
-        std::cout << "MEM CPY DONE\n";
+        // std::cout << "MEM CPY DONE\n";
 
         Ort::MemoryInfo gpu_memory_info = Ort::MemoryInfo("Cuda", OrtDeviceAllocator, _gpu_id, OrtMemTypeDefault);
         std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), CHANNELS, HEIGHT, WIDTH};
@@ -102,8 +102,12 @@ public:
 
         LOG_DEBUG(_logger, "Start inference for {} on gpu {} with batch {}", _runner_name, _gpu_id, batch_size);
         try {
+            // 3. configure the arena to shrink on every Run()
+            std::string gpu = "gpu:" + std::to_string(_gpu_id);
+            Ort::RunOptions run_option;
+            run_option.AddConfigEntry("memory.enable_memory_arena_shrinkage", gpu.c_str());
             auto output_tensor = _session.Run(
-                Ort::RunOptions{nullptr},
+                run_option,
                 _input_names.data(),
                 &_input_tensor,
                 1,
@@ -115,6 +119,8 @@ public:
             std::terminate();
         }
 
+        // free async memory
+        cudaFreeAsync(gpu_ptr, _runner_stream);
     }
 
     Ort::Env _env;
@@ -129,7 +135,7 @@ public:
     std::shared_ptr<spdlog::logger> _logger;
 };
 
-class NodeRunner {
+class NodeRunner : public std::enable_shared_from_this<NodeRunner> {
     // This class manages complete execution on 1 whole GPU
 
     // what should the node runner contain?
@@ -147,8 +153,8 @@ class NodeRunner {
 
     // TO DO: Move all function bodies to .cpp file
 public:
-    NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::shared_ptr<RequestProcessor>> &request_processors): 
-            running_node(*node), gpu_id(gpu_id), request_processors(request_processors) 
+    NodeRunner(std::shared_ptr<Node> node, int gpu_id, std::map<std::string, std::string> &modelsList, std::map<std::string, std::shared_ptr<RequestProcessor>> &request_processors, std::map<std::string, double> &latencies): 
+            running_node(*node), gpu_id(gpu_id), request_processors(request_processors), modelsList(modelsList), latencies(latencies)
     {
         // get logger for node runner and cuda callback
         _logger = Logger::getInstance().getLogger("NodeRunner");
@@ -163,9 +169,36 @@ public:
             exit(EXIT_FAILURE);
         }     
 
+        // initialize SLO tracking for each model
+        for(const auto& [model_name, _]:modelsList) {
+            inference_latency[model_name] = std::vector<float> (inference_latency_size, -1.0);
+            inference_latency_ind[model_name] = 0;
+
+            slo_total_per_model[model_name] = std::vector<std::pair<float, float>> (slo_total_size, {0.0f, 0.0f});
+            slo_total_ind[model_name] = 0;
+        }
+
+        // initialize batch size tracking for each model
+        for(auto [model_name, _]:modelsList) {
+            batch_for_model[model_name] = 0;
+            batch_for_model_update[model_name] = 0;
+        }
+
+        // initialize batch fill rate tracking for each model
+        batch_fill_rate = std::vector<std::vector<float>> (SLOTS_PER_GPU, std::vector<float> (batch_fill_rate_track_size, 0.0f));
+        batch_fill_track_ind = std::vector<int> (SLOTS_PER_GPU, 0);
+
         // initialize ORTRunners for each session in node schedule
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: running_node.session_list) {
+            if(session_ptr->model_name == "EMPTY") {
+                ort_list.push_back({nullptr, nullptr});
+                continue;
+            }
+            
+            // update batch tracking
+            batch_for_model[session_ptr->model_name] = session_ptr->batch_size;
+
             Ort::SessionOptions gpu_session_options;
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = gpu_id;
@@ -177,6 +210,28 @@ public:
             }
             cuda_options.has_user_compute_stream = 1;
             cuda_options.user_compute_stream = static_cast<void*> (ort_stream);
+
+            // fix to deallocate memory chunks from onnxruntime "arena" after each inference run
+            // https://github.com/microsoft/onnxruntime/issues/9509#issuecomment-951546580
+
+            // 1. Not allocate weights memory through the arena
+            gpu_session_options.AddConfigEntry("session.use_device_allocator_for_initializers", "1");
+            
+            // 2. Configure the arena to have high enough initial chunk to support most Run() calls - setting to 500MB
+            const char* keys[] = {"max_mem", "arena_extend_strategy", "initial_chunk_size_bytes", "max_dead_bytes_per_chunk", "initial_growth_chunk_size_bytes"};
+            const size_t values[] = {0 /*let ort pick default max memory*/, 0, 1024, 0, 256};
+
+            OrtArenaCfg* arena_cfg = nullptr;
+            const auto& api = Ort::GetApi();
+            api.CreateArenaCfgV2(keys, values, 5, &arena_cfg) == nullptr;
+            std::unique_ptr<OrtArenaCfg, decltype(api.ReleaseArenaCfg)> rel_arena_cfg(arena_cfg, api.ReleaseArenaCfg);
+
+            cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearch::OrtCudnnConvAlgoSearchExhaustive;
+            cuda_options.gpu_mem_limit = std::numeric_limits<size_t>::max();
+            cuda_options.arena_extend_strategy = 0;
+            cuda_options.do_copy_in_default_stream = false;
+            cuda_options.default_memory_arena_cfg = arena_cfg;
+
             gpu_session_options.AppendExecutionProvider_CUDA(cuda_options);
 
             const std::string onnx_file_path = "models/" + session_ptr->model_name + ".onnx";
@@ -205,12 +260,48 @@ public:
     }
 
     void updateNode(Node updated_node) {
+        LOG_DEBUG(_logger, "Waiting for lock");
         _update.lock();
+        LOG_DEBUG(_logger, "Lock acquired");
+        int penalty = 0;
+
+        for(auto [model_name, _]:modelsList) {
+            batch_for_model_update[model_name] = 0;
+        }
+
+        std::map<std::string, bool> existingModelList;
+        for(auto [model_name,_]:modelsList) existingModelList[model_name] = 0;
+        for(auto& [session_ptr, _]:running_node.session_list) {
+            existingModelList[session_ptr->model_name] = 1;
+        }
+
+        std::map<std::string, int> updated_ort_ind;
+        int ort_ind = 0;
 
         cudaSetDevice(gpu_id);
         for(auto& [session_ptr, _]: updated_node.session_list) {
             auto model_name = session_ptr->model_name;
+            
+            // if empty skip
+            if(model_name == "EMPTY") {
+                update_ort_list.push_back({nullptr, nullptr});
+                ort_ind++;
+                continue;
+            }
+            
+            // keep track of existing models
+            existingModelList[model_name] = 0;
 
+            // update batch tracking
+            batch_for_model_update[model_name] = session_ptr->batch_size;
+
+            // check if model has already been placed in the updated ort
+            if(updated_ort_ind.find(model_name) != updated_ort_ind.end()) {
+                update_ort_list.push_back(update_ort_list[updated_ort_ind[model_name]]);
+                ort_ind++;
+                continue;
+            }
+            
             // check if model name already exists in existing sesison list
             // if it does.. use the corresponding ort runner
             // if not create new runner and add to list
@@ -226,8 +317,10 @@ public:
 
             if(existingInd != -1) {
                 update_ort_list.push_back(ort_list[existingInd]);
+                updated_ort_ind[model_name] = ort_ind;
             } else {
                 LOG_DEBUG(_logger, "UPDATE DETECTED: New ORTRunner being created on gpu:{} for model {}", gpu_id, session_ptr->model_name);
+                penalty++;
                 Ort::SessionOptions gpu_session_options;
                 OrtCUDAProviderOptions cuda_options;
                 cuda_options.device_id = gpu_id;
@@ -262,11 +355,21 @@ public:
                     std::terminate();
                 }
                 update_ort_list.push_back({ort_ptr, ort_ptr->_runner_stream});
+                updated_ort_ind[model_name] = ort_ind;
             }
+
+            ort_ind++;
         }
         
+        for(auto [model_name, isGone]:existingModelList) {
+            if(isGone) penalty++;
+        }
+
+        slot_switch_penalty = penalty / SLOTS_PER_GPU;
+
         update_node = updated_node;
         pendingUpdate = true;
+        LOG_DEBUG(_logger, "Update DONE");
         _update.unlock();
     }
 
@@ -284,6 +387,119 @@ public:
         }
     }
 
+    std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> get_session_list() {
+        return running_node.session_list;
+    }
+
+    std::vector<float> get_slo_failure_persent(int num_of_schedules) {
+        std::vector<float> stats_percent;
+        _lock_stats.lock();
+        for(auto [model_name, total]:slo_total_per_model) {
+            auto ind = (slo_total_ind[model_name] - 1 + slo_total_size) % slo_total_size;
+            float num = 0;
+            float den = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+                num += total[ref_ind].first;
+                den += total[ref_ind].first + total[ref_ind].second;
+            }
+            
+            float val = 0;
+            if(den > 0) val = (num / den) * (100.0);
+            stats_percent.push_back(val/num_of_schedules);
+        }
+
+        _lock_stats.unlock();
+        return stats_percent;
+    }
+
+    std::vector<std::pair<float, float>> get_slo_total(int num_of_schedules) {
+        std::vector<std::pair<float, float>> stats_total;
+        _lock_stats.lock();
+        for(auto [model_name, total]:slo_total_per_model) {
+            auto ind = slo_total_ind[model_name];
+            std::pair<float, float> val = {total[ind].first, total[ind].second};
+            // for(int j=0;j<num_of_schedules;j++) {
+            //     auto ref_ind = (ind - j + slo_track_size) % slo_track_size;
+            //     val.first += total[ref_ind].first;
+            //     val.second += total[ref_ind].second;
+            // }
+
+            stats_total.push_back(val);
+        }
+
+        _lock_stats.unlock();
+        return stats_total;
+    }
+
+    float get_batch_fill_rate(int num_of_schedules) {
+        // std::vector<float> stats_rate;
+        float fill_rate = 0;
+        _lock_stats.lock();
+        for(int i=0;i<batch_fill_rate.size();i++) {
+            auto ind = (batch_fill_track_ind[i] - 1 + batch_fill_rate_track_size) % batch_fill_rate_track_size;
+            float val = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + batch_fill_rate_track_size) % batch_fill_rate_track_size;
+                val += batch_fill_rate[i][ref_ind];
+            }
+
+            fill_rate += val/num_of_schedules;
+        } fill_rate /= SLOTS_PER_GPU;
+        _lock_stats.unlock();
+        return fill_rate;
+    }
+
+    std::vector<float> get_inference_latency(int num_of_schedules) {
+        std::vector<float> stats;
+        
+        _lock_stats.lock();
+        for(auto [model_name, lat]:inference_latency) {
+            auto ind = (inference_latency_ind[model_name] - 1 + inference_latency_size) % inference_latency_size;
+            float val = 0;
+            for(int j=0;j<num_of_schedules;j++) {
+                auto ref_ind = (ind - j + inference_latency_size) % inference_latency_size;
+                val += lat[ref_ind];
+            }
+
+            stats.push_back(val/num_of_schedules);
+        }
+
+        _lock_stats.unlock();
+        return stats;
+    }
+
+    std::vector<int> get_batch_per_model() {
+        std::vector<int> batch_sizes;
+        for(const auto &[_, batch_size]:batch_for_model) {
+            batch_sizes.push_back(batch_size);
+        }
+
+        return batch_sizes;
+    }
+
+    int get_slot_switch_penalty() {
+        return slot_switch_penalty;
+    }
+
+    bool gpu_in_use() {
+        for(const auto &[_, batch_size]:batch_for_model) {
+            if(batch_size > 0) return true;
+        }
+
+        return false;
+    }
+
+    float get_peak_memory() {
+        return peak_mem_per_schedule;
+    }
+
+    void reset_slo() {
+        _reset.lock();
+        pendingReset = true;
+        _reset.unlock();
+    }
+
     ~NodeRunner() {
         if (_runner_thread.joinable()) {
             _runner_thread.join();  // or _runner_thread.detach() if appropriate
@@ -294,14 +510,39 @@ public:
 
 private:
     std::mutex _update;
+    std::mutex _reset;
     bool pendingUpdate;
+    bool pendingReset;
     Node update_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> update_ort_list;
+    std::map<std::string, std::string> modelsList;
+    std::map<std::string, std::vector<std::pair<float, float>>> slo_total_per_model;
+    std::map<std::string, int> slo_total_ind;
+    std::map<std::string, std::vector<float>> inference_latency;
+    std::map<std::string, int> slo_track_ind;
+    std::vector<std::vector<float>> batch_fill_rate;
+    std::vector<int> batch_fill_track_ind;
+    std::map<std::string, int> inference_latency_ind;
+    int inference_latency_size = 10;
+    int slo_track_size = 10;
+    int batch_fill_rate_track_size = 10;
+    int slo_total_size = 10;
+    std::mutex _lock_stats;
+    std::map<std::string, double> latencies;
+    std::map<std::string, int> batch_for_model_update;
+    std::map<std::string, int> batch_for_model;
+    int peak_mem_per_schedule = 0; // in MB
+    int peak_mem_per_schedule_cur = 0; // in MB
+    int slot_switch_penalty = 0; // normalized
 
     struct CallbackData {
         std::string _tag;
         std::shared_ptr<spdlog::logger> _logger;
-        CallbackData(std::string tag, std::shared_ptr<spdlog::logger> logger): _tag(tag), _logger(logger) {}
+        std::shared_ptr<NodeRunner> _runner;
+        BatchInfo _batch_info;
+        int64_t _inference_start_time;
+        CallbackData(std::string tag, std::shared_ptr<spdlog::logger> logger, std::shared_ptr<NodeRunner> runner, BatchInfo batch_info, int64_t inference_start_time): 
+        _tag(tag), _logger(logger), _runner(runner), _batch_info(batch_info), _inference_start_time(inference_start_time) {}
     };
 
     static void CUDART_CB log_callback(void* user_data) {
@@ -312,24 +553,116 @@ private:
     
         //data->_logger->info("BATCH PROCESSED: {} @ {}", data->_tag, now_us);
         data->_logger->info("BATCH PROCESSED: {} @ {}", data->_tag, now_us);
+
+        // call post process to log slo rate and latencies
+        data->_runner->post_process_async(data->_tag, data->_batch_info, data->_inference_start_time, now_us);
         delete data;
+    }
+
+    void post_process_async(std::string tag, BatchInfo batch_info, int64_t inference_start_time, int64_t inference_end_time) {
+        std::thread([this, tag, batch_info, inference_start_time, inference_end_time] {
+            try {
+                _lock_stats.lock();
+
+                // get model name
+                size_t pos = tag.find('_');
+                std::string model_name = (pos == std::string::npos) ? tag : tag.substr(0, pos);
+
+                // process slo rate
+                float fail_count = batch_info._stale_req_count;
+                float success_count = 0;
+                double slo_latency = latencies[model_name];
+
+                for(auto entry:batch_info._batch_timing_info) {
+                    auto count = entry.first;
+                    auto arrival_time = entry.second;
+
+                    double service_latency = (double(inference_end_time - arrival_time))/1000.0;
+                    if(service_latency > slo_latency) {
+                        fail_count += count;
+                    } else {
+                        success_count += count;
+                    }
+                }
+
+                // track total fail and success count
+                LOG_DEBUG(_logger, "Post process async fail count: {}, success count: {}", fail_count, success_count);
+                auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
+                stat.first += fail_count; stat.second += success_count;
+
+                // process inference latency
+                double infernce_latency_cal = (double(inference_end_time - inference_start_time)) / 1000.0;
+                inference_latency[model_name][inference_latency_ind[model_name]] = infernce_latency_cal;
+                inference_latency_ind[model_name] = (inference_latency_ind[model_name] + 1) / inference_latency_size;
+
+                _lock_stats.unlock();
+            } catch (const std::exception& e) {
+                LOG_ERROR(_logger, "Exception is post process async: {}", e.what());
+            } catch (...) {
+                LOG_ERROR(_logger, "Unknown exception in post process async");
+            }
+        }).detach();
+    }
+
+    void monitor_total_gpu_usage() {
+        size_t total_mem = 0;
+        size_t current_used = 0;
+        size_t max_used = 0;
+
+        while (_schedule_running.load()) {
+            size_t free_mem = 0;
+            cudaMemGetInfo(&free_mem, &total_mem);
+
+            current_used = total_mem - free_mem;
+            if (current_used > max_used) {
+                max_used = current_used;
+            }
+
+            std::this_thread::sleep_for(std::chrono::microseconds(100));  // 0.1 ms
+        }
+
+        peak_mem_per_schedule_cur = max_used;
+        peak_mem_per_schedule = std::max(peak_mem_per_schedule, peak_mem_per_schedule_cur);
     }
 
     void run() {
         CUDACHECK(cudaSetDevice(gpu_id));
         _running = true;
+        LOG_DEBUG(_logger, "NODE RUN: Start run loop for gpu:{}", gpu_id);
         while(_running) {
             if(!_running) break;
 
+            // reset peak memory tracking for GPU
+            peak_mem_per_schedule = 0;
+            _schedule_running = true;
+            std::thread monitor(&NodeRunner::monitor_total_gpu_usage, this);
+
+            // track if node is empty
+            bool is_empty = true;
+
             // loop through all session in the schedule
             if(running_node.session_list.size() > 0) {
-                LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
+                // LOG_DEBUG(_logger, "NODE RUN: Found node with number of session: {}", running_node.session_list.size());
+                // LOG_DEBUG(_logger, "Duty cycle start with session size {} on gpu {}", running_node.session_list.size(), gpu_id);
+                
+                // keep track of active streams to enable parallel execution
                 std::vector<cudaStream_t> running_streams;
+                
+                // track batch fill rate per slot
+                int slot_num = 0;
+                
                 auto schedule_start = std::chrono::steady_clock::now();
                 for(int i=0;i<running_node.session_list.size();i++) {
                     auto session_ptr = running_node.session_list[i].first;
                     auto occ_ratio = running_node.session_list[i].second.first;
                     auto is_parallel = running_node.session_list[i].second.second;
+
+                    if(session_ptr->model_name == "EMPTY") {
+                        slot_num++;
+                        continue;
+                    }
+
+                    is_empty = false;
 
                     if(is_parallel == 0) {
                         // wait for previous streams to complete
@@ -339,18 +672,30 @@ private:
 
                         running_streams.clear();
                     }
+                    
+                    auto now = std::chrono::high_resolution_clock::now();
+                    int64_t inference_start_time = std::chrono::duration_cast<std::chrono::microseconds>(
+                        now.time_since_epoch()
+                    ).count();
 
                     // get batch from request processor
-                    auto batch_current = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size, gpu_id);
+                    auto batch_info = request_processors[session_ptr->model_name]->form_batch(session_ptr->batch_size, gpu_id);
+                    auto batch_current = batch_info._batch_size;
+                    
+                    // update batch fill rate
+                    batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = 0;
+                    if(session_ptr->batch_size > 0) batch_fill_rate[slot_num][batch_fill_track_ind[slot_num]] = (batch_current / session_ptr->batch_size) * 100.0;
+                    batch_fill_track_ind[slot_num] = (batch_fill_track_ind[slot_num] + 1) % batch_fill_rate_track_size;
 
                     // launch inference using ORTRunner
                     auto ort_ptr = ort_list[i].first;
                     if(batch_current>0) {
+                        LOG_DEBUG(_logger, "NODE RUN: Running slot: {}, with model: {} and batch: {}", slot_num, session_ptr->model_name, batch_current);
                         ort_ptr->run_inference(batch_current);
 
                         // add logging callback
                         std::string id = session_ptr->model_name + "_" + std::to_string(gpu_id);
-                        auto* callBackData = new CallbackData(id, _callback_logger);
+                        auto* callBackData = new CallbackData(id, _callback_logger, shared_from_this(), batch_info, inference_start_time);
                         cudaLaunchHostFunc(
                             ort_ptr->_runner_stream,
                             log_callback,
@@ -358,7 +703,7 @@ private:
                         );
 
                         running_streams.push_back(ort_ptr->_runner_stream);
-                    }
+                    } slot_num++ ;
                 } if (running_streams.size()) {
                     // wait for all running streams to complete
                     for(auto stream:running_streams) {
@@ -374,8 +719,39 @@ private:
                 auto duration_ms = running_node.duty_cycle;
                 if(elapsed_time.count() < duration_ms) {
                     auto sleep_time_ms = std::chrono::milliseconds((long long)duration_ms - elapsed_time.count());
+                    LOG_DEBUG(_logger, "NODE RUN: Going to sleep for time: {}", sleep_time_ms.count()); 
                     std::this_thread::sleep_for(sleep_time_ms);
                 }
+            } else {
+                LOG_DEBUG(_logger, "NODE RUN: Pause for 100ms when node is empty");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+            }
+
+            if(is_empty) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
+            // stop monitoring thread
+            _schedule_running = false;
+
+            // check on all request queues
+            for(auto [model_name, processor]:request_processors) {
+                auto &stat = slo_total_per_model[model_name][slo_total_ind[model_name]];
+                int stale_count = processor->form_batch(0, gpu_id)._stale_req_count;
+                stat.first += stale_count;
+
+                if(stale_count > 0) LOG_DEBUG(_logger, "NODE RUN: Discarded {} stale reqs for {}", stale_count, model_name); 
+            }
+            
+            // check if reset is pending
+            if(pendingReset) {
+                _reset.lock();
+                pendingReset = false;
+                for(auto [model_name,_]:request_processors) {
+                    slo_total_per_model[model_name][slo_total_ind[model_name]] = {0, 0};
+                    slo_total_ind[model_name] = (slo_total_ind[model_name] + 1) % slo_total_size;
+                }
+                _reset.unlock();
             }
 
             // check if update is needded
@@ -386,16 +762,34 @@ private:
                     running_node = update_node;
                     ort_list = update_ort_list;
 
+                    // update batch size info
+                    batch_for_model = batch_for_model_update;
+
+                    // reset memory tracking
+                    peak_mem_per_schedule = 0;
+                    peak_mem_per_schedule_cur = 0;
+
                     pendingUpdate = false;
                     update_ort_list.clear();
                     LOG_DEBUG(_logger, "Releasing lock after update finished, new list size is {}", ort_list.size());
                 _update.unlock();
+
+                LOG_DEBUG(_logger, "Schedule after update is: ");
+                for(int i=0;i<running_node.session_list.size();i++) {
+                    auto session_ptr = running_node.session_list[i].first;
+                    bool is_runner = (ort_list[i].first == nullptr) ? false:true;
+                    LOG_DEBUG(_logger, "Slot: {}, Model: {}, ORTRunner: {}", i, session_ptr->model_name, is_runner);
+                }
             }
+
+            // join the monitor thread
+            if(monitor.joinable()) monitor.join();
         }
     }
 
     std::atomic<bool> _running = false;
-    
+    std::atomic<bool> _schedule_running = false;
+
     int gpu_id;
     Node running_node;
     std::vector<std::pair<std::shared_ptr<ORTRunner>, cudaStream_t>> ort_list;

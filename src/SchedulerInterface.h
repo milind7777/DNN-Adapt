@@ -35,8 +35,8 @@ struct Node {
     double duty_cycle; // in ms
     Gpu gpu = Gpu("A6000", 48);
 
-    Node(const std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>>& session_list = {},
-        double duty_cycle = 0.0): session_list(session_list), duty_cycle(duty_cycle) {}    
+    Node(const std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list = {},
+        double duty_cycle = 0.0): session_list(session_list), duty_cycle(duty_cycle) {}
 
     double getOccupancy() {
         double total_occupancy = 0.0;

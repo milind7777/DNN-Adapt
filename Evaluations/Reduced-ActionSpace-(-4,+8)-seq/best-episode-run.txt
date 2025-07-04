@@ -1,0 +1,399 @@
+================================================================================
+EPISODE 202 - 2025-06-07T04:05:23.468657
+Total Reward: 22.737 | Episode Length: 20
+================================================================================
+
+STEP 0 - Reward: 1.420
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 0
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> vit16 (ID:2), Delta 8, Parallel 0
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 0
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: EMPTY
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 1 - Reward: 0.986
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 1
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 8.33req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 1
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: resnet18, 1000.0ms, 8.33req/s, queue=50, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 2 - Reward: 0.491
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 2
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 2
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> vit16 (ID:2), Delta 8, Parallel 0
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 3 - Reward: 0.916
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 3
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 2 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=50, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 3
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 4 - Reward: 1.218
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 4
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> efficientnetb0 (ID:0), Delta 8, Parallel 0
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=50, observed_batch=8, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 4
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 5 - Reward: 1.271
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 5
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 1 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=2, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 5
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 6 - Reward: 1.236
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 6
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 1 -> efficientnetb0 (ID:0), Delta 8, Parallel 0
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: efficientnetb0, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 6
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 7 - Reward: 1.321
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 7
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=26, observed_batch=8, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: efficientnetb0, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=26, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 7
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 8 - Reward: 1.351
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 8
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: efficientnetb0, 1000.0ms, 50.00req/s, queue=9, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 8
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 9 - Reward: 1.317
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 9
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: efficientnetb0, 1000.0ms, 50.00req/s, queue=9, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 9
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 10 - Reward: 1.317
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 10
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: efficientnetb0, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 10
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 11 - Reward: 0.974
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 11
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 1 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 11
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 12 - Reward: 0.865
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 12
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 1 -> resnet18 (ID:1), Delta -4, Parallel 0
+      Slot 0: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=-4, deployed_batch=4, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 12
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 13 - Reward: 0.865
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 13
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> vit16 (ID:2), Delta -4, Parallel 0
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=-4, deployed_batch=0, execution_mode:sequential
+      Slot 1: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=4, batch_delta=+0, deployed_batch=4, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 13
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 14 - Reward: 0.865
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 14
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 1 -> vit16 (ID:2), Delta 8, Parallel 0
+      Slot 0: EMPTY
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=4, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 14
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 15 - Reward: 0.865
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 15
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: EMPTY
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 15
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 16 - Reward: 1.196
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 16
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 0 -> efficientnetb0 (ID:0), Delta 8, Parallel 0
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=50, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 16
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: EMPTY
+****************************************************************************
+
+----------------------------------------
+
+STEP 17 - Reward: 1.420
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 17
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=17, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=17, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 17
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 2 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=17, observed_batch=0, batch_delta=+8, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+----------------------------------------
+
+STEP 18 - Reward: 1.420
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 18
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+    >>> ACTION: Slot 2 -> resnet18 (ID:1), Delta 8, Parallel 0
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=17, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+8, deployed_batch=16, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 18
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+----------------------------------------
+
+STEP 19 - Reward: 1.420
+****************************************************************************
+    GPU 0: A6000  |  GPU MEMORY: 48GB | STEP: 19
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: efficientnetb0, 1000.0ms, 50.00req/s, queue=17, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=16, batch_delta=+0, deployed_batch=16, execution_mode:sequential
+****************************************************************************
+
+****************************************************************************
+    GPU 1: A6000  |  GPU MEMORY: 48GB | STEP: 19
+    Session List: {model_name, SLO, request_rate, queue_size, observed_batch, batch_delta, deployed_batch, execution_mode}
+      Slot 0: vit16, 1500.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+      Slot 1: EMPTY
+      Slot 2: resnet18, 1000.0ms, 50.00req/s, queue=0, observed_batch=8, batch_delta=+0, deployed_batch=8, execution_mode:sequential
+****************************************************************************
+
+----------------------------------------

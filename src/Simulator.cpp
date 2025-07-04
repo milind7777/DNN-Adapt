@@ -1,9 +1,11 @@
 #include "Simulator.h"
 #include <iostream>
 #include <cmath>
+#include <random>
 
 // The second level granularity for the request rate simulator
 double QUANTIZATION_INTERVAL = 0.5;
+double episode_count = 0;
 
 /*
     Dynamic request rate simulator
@@ -29,6 +31,9 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
         auto block_vars = block.second.second;
         auto residual_fraction = 0;
         for(int i=0;i<iteration_count;i++) {
+            // stop if simulator is reset
+            if(stop_flag) break;
+            
             // register start time
             auto start_time = steady_clock::now();
             
@@ -71,9 +76,12 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
             const auto now = std::chrono::high_resolution_clock::now();
             auto time_since_epoch = now.time_since_epoch();
             auto current_second = std::chrono::duration_cast<std::chrono::microseconds>(time_since_epoch).count();
-            // logging request rate
-            LOG_TRACE(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
-            LOG_TRACE(_logger, "Simulation Current Rate @ Current time: {} for model {} is @ rate {}", current_second, request->model_name, request_rate);
+            
+            if(request_rate>0) {
+                // logging request rate
+                LOG_TRACE(_logger, "Simulating rate: {} for model {}", request_rate, request->model_name);
+                LOG_TRACE(_logger, "Simulation Current Rate @ Current time: {} for model {} is @ rate {}", current_second, request->model_name, request_rate);
+            }
 
             // get total request count by adding fractional count leftover from previous block
             auto request_count = request_rate * QUANTIZATION_INTERVAL + residual_fraction;
@@ -89,13 +97,15 @@ void Simulator::dynamic_request_rate_generator(std::shared_ptr<RequestProcessor>
             auto sleep_time = int(QUANTIZATION_INTERVAL * 1000) - duration_cast<milliseconds>(end_time - start_time).count();
             // std::cout << "sleep time: " << sleep_time << std::endl;
             if(sleep_time > 0) {
-                std::this_thread::sleep_for(milliseconds(sleep_time));
+                std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
             }
+        } if (stop_flag) {
+            break;
         }
     }
 }
 
-void Simulator::run() {
+void Simulator::run(int seed) {
     /*
         Avaialble model list:
         * efficientnetb0
@@ -104,26 +114,111 @@ void Simulator::run() {
     */
 
     std::map<std::string, std::vector<std::pair<rate_type, std::pair<double, std::vector<double>>>>> schedules;
-
-    // schedules["efficientnetb0"] = {
-    //     {rate_type::ramp, {5, {10}}},
-    //     {rate_type::flat, {20, {50}}},
-    //     {rate_type::ramp, {5, {-10}}}
-    // };
+    
+    schedules["efficientnetb0"] = {
+        {rate_type::flat, {5, {0}}},
+        {rate_type::ramp, {25, {2}}},
+        {rate_type::flat, {160, {50}}}
+    };
 
     schedules["resnet18"] = {
-        {rate_type::flat, {10, {0}}},
-        {rate_type::ramp, {10, {2}}},
-        {rate_type::flat, {40, {10}}},
-        {rate_type::exponential_decay, {20, {0.8}}}
+        {rate_type::flat, {5, {0}}},
+        {rate_type::ramp, {25, {2}}},
+        {rate_type::flat, {160, {50}}}
+        // {rate_type::exponential_decay, {20, {0.8}}}
     };
 
     schedules["vit16"] = {
-        {rate_type::flat, {10, {0}}},
-        {rate_type::ramp, {5, {2}}},
-        {rate_type::flat, {30, {10}}},
-        {rate_type::exponential_decay, {20, {0.8}}}
+        {rate_type::flat, {5, {0}}},
+        {rate_type::ramp, {25, {4}}},
+        {rate_type::flat, {160, {100}}}
+        // {rate_type::flat, {30, {10}}},
+        // {rate_type::exponential_decay, {20, {0.8}}}
     };
+
+    // schedules["efficientnetb0"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {2}}},
+    //     {rate_type::sinusoidal, {100, {20, 0.1}}},
+    //     {rate_type::flat, {55, {25}}}
+    // };
+
+    // schedules["resnet18"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {2}}},
+    //     {rate_type::flat, {80, {50}}},
+    //     {rate_type::burst, {5, {20, 2}}},
+    //     {rate_type::flat, {70, {50}}}
+    //     // {rate_type::exponential_decay, {20, {0.8}}}
+    // };
+
+    // schedules["vit16"] = {
+    //     {rate_type::flat, {5, {0}}},
+    //     {rate_type::ramp, {25, {4}}},
+    //     {rate_type::flat, {160, {100}}}
+    //     // {rate_type::flat, {30, {10}}},
+    //     // {rate_type::exponential_decay, {20, {0.8}}}
+    // };
+
+    // int min = 0;
+    // int max = 100;
+
+    // episode_count++;
+    // int rate;
+    // if(episode_count <= 15) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 25;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 30) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 50;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 50) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 75;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 65) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 25;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 80) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 50;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 100) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 75;
+    //     schedules["vit16"][1].second.second[0] = 0;
+    // } else if(episode_count <= 115) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 25;
+    // } else if(episode_count <= 130) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 50;
+    // } else if(episode_count <= 150) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 0;
+    //     schedules["resnet18"][1].second.second[0] = 0;
+    //     schedules["vit16"][1].second.second[0] = 75;
+    // } else if (episode_count <= 200) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 25;
+    //     schedules["resnet18"][1].second.second[0] = 25;
+    //     schedules["vit16"][1].second.second[0] = 25;
+    // } else if(episode_count <= 300) {
+    //     schedules["efficientnetb0"][1].second.second[0] = 50;
+    //     schedules["resnet18"][1].second.second[0] = 50;
+    //     schedules["vit16"][1].second.second[0] = 50;
+    // } else {
+    //     // choose constant random rates for all models
+    //     schedules["efficientnetb0"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    //     schedules["resnet18"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    //     schedules["vit16"][1].second.second[0] = (std::rand() % (max - min + 1)) + min;
+    // }
+
+    // reset flags
+    stop_flag = false;
+    done_flag = false;
 
     // Launch threads for each model
     std::vector<std::thread> threads;
@@ -136,4 +231,7 @@ void Simulator::run() {
     for(auto &t:threads) {
         t.join();
     }
+
+    // set flag
+    done_flag = true;
 }

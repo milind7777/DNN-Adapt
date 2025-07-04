@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Configuration
-CSV_DATA_DIR = '/home/cching1/DNNAdapt/DNN-Adapt/util/csv_data_cache' # Read CSVs from here
+CSV_DATA_DIR = '/home/mpenumat/DNN-Adapt/util/csv_data_cache' # Read CSVs from here
 REFRESH_INTERVAL_MS = 1000 # How often to refresh the dashboard
 
 # CSV Filenames (must match those in log_csv_processor.py)

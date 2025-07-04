@@ -5,16 +5,26 @@
 #include "nexus.h"
 #include "NodeRunner.h"
 #include "Logger.h"
+#include "Simulator.h"
 #include <fstream>
+#include "com/agent_scheduler.grpc.pb.h"
+
+using gpu_scheduler::StepRequest;
+using gpu_scheduler::ScheduleEntry;
+using gpu_scheduler::StepRequestReduced;
+
+extern const int SLOTS_PER_GPU;
 
 class Executor {
 public:
     Executor(std::map<std::string, std::string> &modelsList, 
              std::vector<std::shared_ptr<Gpu>> &gpuList,
              std::map<std::string, std::shared_ptr<RequestProcessor>> &requestProcessorList,
+             std::shared_ptr<Simulator> simulator,
              std::map<std::string, double> &latencies,
-             std::string profilingFolder): 
-                _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _latencies(latencies), _profilingFolder(profilingFolder)
+             std::string profilingFolder,
+             std::string run_mode): 
+                _gpuList(gpuList), _modelsList(modelsList), _requestProcessorList(requestProcessorList), _simulator(simulator), _latencies(latencies), _profilingFolder(profilingFolder), _run_mode(run_mode)
     {
         // get logger
         _logger = Logger::getInstance().getLogger("Executor");
@@ -23,14 +33,28 @@ public:
             exit(EXIT_FAILURE);
         }
         
+        // set id to model vector
+        for(const auto &[model_name, _]:_modelsList) {
+            id_to_model.push_back(model_name);
+        } id_to_model.push_back("EMPTY");
+
+        for(int i=0;i<id_to_model.size();i++) {
+            model_to_id[id_to_model[i]] = i;
+        }
+
         // Load SLO configuration
         // load_slo_config("/home/cching1/DNNAdapt/DNN-Adapt/util/slo_config.json");
         
         // initialize NodeRunners according to the gpuList
         LOG_DEBUG(_logger, "Initialize NodeRunners");
         for(int i=0;i<_gpuList.size();i++) {
-            auto emptyNode = std::make_shared<Node>();
-            _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _requestProcessorList));
+            std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list;
+            for(int j=0;j<SLOTS_PER_GPU;j++) {
+                session_list.push_back({std::make_shared<Session> ("EMPTY", 0, 0, 0), {0, 0}});
+            }
+
+            auto emptyNode = std::make_shared<Node>(session_list);
+            _nodeRunnersList.push_back(std::make_shared<NodeRunner>(emptyNode, i, _modelsList, _requestProcessorList, _latencies));
         }
 
         // initialize scheduler: currently using nexus
@@ -39,6 +63,433 @@ public:
         for(auto [name, _]: modelsList) modelNames.push_back(name);
         _scheduler = std::make_shared<NexusScheduler>(_gpuList, modelNames, _profilingFolder);
     };
+
+    bool isDone() {
+        return _simulator->isDone();
+    }
+
+    void reset(int seed) {
+        LOG_DEBUG(_logger, "Received RESET in Executor");
+        // stop simulation
+        _simulator->reset();
+        if(_simulation_thread.joinable()) {
+            LOG_DEBUG(_logger, "Calling join on simulator thread");
+            _simulation_thread.join();
+        }
+
+        // clear request queues
+        for(const auto &[model_name, processor]:_requestProcessorList) {
+            processor->clear_queue();
+        }
+
+        // stop node runners
+        for(auto runner:_nodeRunnersList) {
+            runner->stop();
+        }
+        
+        // clear node runners
+        for(auto runner:_nodeRunnersList) {
+            std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list;
+            if(_run_mode == "batch8") {
+                // testing base case where all models are deployed with fixed batch size
+                for(int j=0;j<SLOTS_PER_GPU;j++) {
+                    std::string model_name = id_to_model[j];
+                    session_list.push_back({std::make_shared<Session> (model_name, _latencies[model_name], 1, 8), {0, 0}});
+                }
+            } else {
+                for(int j=0;j<SLOTS_PER_GPU;j++) {
+                    session_list.push_back({std::make_shared<Session> ("EMPTY", 0, 0, 0), {0, 0}});
+                }
+            }
+            
+            Node emptyNode = Node(session_list);
+            runner->updateNode(emptyNode);
+        }
+
+        // restart simulation
+        LOG_DEBUG(_logger, "Restarting simulator thread");
+        _simulation_thread = std::thread(&Simulator::run, _simulator.get(), seed);
+    
+        // restart node runners
+        for(auto runner:_nodeRunnersList) {
+            runner->start();
+        }
+
+        // wait for some time for nodes to update
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    void stopSimulation() {
+        _simulator->reset();
+        if(_simulation_thread.joinable()) {
+            LOG_DEBUG(_logger, "Calling join on simulator thread");
+            _simulation_thread.join();
+        }
+    }
+
+    std::vector<float> get_observation() {
+        LOG_DEBUG(_logger, "Received observation request on Executor");
+        // For each model
+        // 1. Request rate - float (normalized)
+        LOG_DEBUG(_logger, "Fetching request rates");
+        std::vector<float> req_rates;
+        for(const auto &[_, processor]:_requestProcessorList) {
+            req_rates.push_back(processor->get_request_rate());
+        }
+
+        // 2. Queue Size - float (normalized)
+        std::vector<int> queue_sizes;
+        for(const auto &[_, processor]:_requestProcessorList) {
+            queue_sizes.push_back(processor->get_queue_size());
+        }
+
+        // 3. SLO latency in ms - float (normalized)
+        std::vector<float> slo;
+        for(const auto &[_, latency]:_latencies) {
+            slo.push_back(latency);
+        }
+
+        // 4. SLO latency satisfaction % - array of [float] of size num_gpus (normalized)
+        LOG_DEBUG(_logger, "Fetching slo rates");
+        int m = _modelsList.size();
+        std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
+        for(auto runner:_nodeRunnersList) {
+            auto count = runner->get_slo_total(1);
+            for(int i=0;i<count.size();i++) {
+                slo_total[i].first += count[i].first;
+                slo_total[i].second += count[i].second;
+            }
+        }
+
+        std::vector<float> slo_rate(m, 0);
+        for(int i=0;i<m;i++) {
+            float slo_fail_total = slo_total[i].first;
+            float slo_cnt_total = slo_total[i].first + slo_total[i].second;
+            if(slo_cnt_total > 0) slo_rate[i] += slo_fail_total / slo_cnt_total;
+        }
+
+        // get slot information of all gpus
+        std::vector<float> slot_info;
+        for(auto runner:_nodeRunnersList) {
+            auto session_list = runner->get_session_list();
+            for(int i=0;i<session_list.size();i++) {
+                std::string model_name = session_list[i].first->model_name;
+                int model_id = model_to_id[model_name];
+                
+                // 1. Model id deployed - one hot encoding
+                for(int j=0;j<=_modelsList.size();j++) {
+                    if(j == model_id) slot_info.push_back(1.0f);
+                    else slot_info.push_back(0.0f);
+                }
+
+                // 2. Batch size - float (normalized)
+                slot_info.push_back(session_list[i].first->batch_size);
+
+                // 3. In parallel - bool
+                slot_info.push_back(session_list[i].second.second);
+            }
+        }
+
+        // reconstruct observation: per model there should be 4 entries
+        std::vector<float> observation;
+        LOG_DEBUG(_logger, "Reconstructing observation from fetched data");
+        for(int i=0;i<_modelsList.size();i++) {
+            observation.push_back(req_rates[i]);
+            observation.push_back(queue_sizes[i]);
+            observation.push_back(slo[i]);
+            observation.push_back(slo_rate[i]);
+        }
+
+        observation.insert(observation.end(), slot_info.begin(), slot_info.end());
+        return observation;
+    }
+
+    void reset_slo() {
+        for(auto runner:_nodeRunnersList) {
+            runner->reset_slo();
+        }
+    }
+
+    std::vector<float> get_reward(int num_schedules) {
+        // Reward = - alpha * slo failure rate
+        //          - beta  * num of GPUs
+        //          - gamma * batch fill rate
+        //          - omega * slot switch rate  
+        //
+        // alpha = 1.0f, beta = 0.2f, gamma = 0.2f, omega = 0.2f
+        float alpha = 1.0f;
+        float beta  = 0.2f;
+        float gamma = 0.2f;
+        float omega = 0.2f;
+
+        int m = _modelsList.size();
+        std::vector<std::pair<float, float>> slo_total(m, {0.0f, 0.0f});
+        for(auto runner:_nodeRunnersList) {
+            auto count = runner->get_slo_total(1);
+            for(int i=0;i<count.size();i++) {
+                slo_total[i].first += count[i].first;
+                slo_total[i].second += count[i].second;
+            }
+        }
+
+        float slo_penalty_fail = 0;
+        float slo_penalty_total = 0;
+        for(int i=0;i<m;i++) {
+            float slo_fail_total = slo_total[i].first;
+            float slo_cnt_total = slo_total[i].first + slo_total[i].second;
+            slo_penalty_fail += slo_fail_total;
+            slo_penalty_total += slo_cnt_total;
+            LOG_DEBUG(_logger, "SLO LOGGING: {}, fail: {}, total: {}", id_to_model[i], slo_fail_total, slo_cnt_total);
+        } 
+        
+        float slo_penalty = 0;
+        if(slo_penalty_total > 0) slo_penalty = (slo_penalty_fail) / (slo_penalty_total);
+
+        // float slo_penalty = 0;
+        // if((slo_fail_total + slo_success_total) > 0) slo_penalty = slo_fail_total / (slo_fail_total + slo_success_total);
+
+        // LOG_DEBUG(_logger, "Fetching slo rates to calculate reward");
+        // std::vector<std::vector<std::vector<float>>> slo_rate;
+        // for(auto runner:_nodeRunnersList) {
+        //     slo_rate.push_back(runner->get_slo_rate(num_schedules));
+        // }
+
+        // float total_request_count = 0;
+        // float total_fail_count_weighted = 0;
+        // for(auto& rates:slo_rate) {
+        //     auto& per = rates[0];
+        //     auto& raw = rates[1];
+        //     auto& total = rates[2];
+
+        //     for(int i=0;i<per.size();i++) {
+        //         float count = total[i];
+        //         total_request_count += count;
+        //         total_fail_count_weighted += per[i] * count;
+        //     }
+        // }
+
+        // float slo_penalty = 0;
+        // if(total_request_count > 0) slo_penalty = (total_fail_count_weighted / total_request_count) / 100.0;
+        
+        float gpu_count = 0;
+        for(auto runner:_nodeRunnersList) gpu_count += runner->gpu_in_use();
+        gpu_count /= _gpuList.size();
+        
+        float batch_fill_penalty = 0;
+        for(auto runner:_nodeRunnersList) {
+            batch_fill_penalty += (1 - runner->get_batch_fill_rate(3));
+        } batch_fill_penalty /= (_nodeRunnersList.size() * 100.0);
+
+        float slot_switch_penalty = 0;
+        for(auto runner:_nodeRunnersList) {
+            slot_switch_penalty += runner->get_slot_switch_penalty();
+        } slot_switch_penalty /= _gpuList.size();
+
+        float mask = 1 - slo_penalty;
+        // if(slo_penalty >= .05) mask = 0;
+
+        std::vector<float> reward = { alpha * (1 - slo_penalty), beta * (1 - gpu_count) * mask, gamma * (1 - batch_fill_penalty) * mask, omega * (1 - slot_switch_penalty) * mask};
+        return reward;
+    }
+
+    std::pair<std::map<std::string, bool>, std::vector<int>> get_cur_model_list(std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> _session_lst, int gpu_id) {
+        std::map<std::string, bool> cur_model = {
+            {"vit16", false},
+            {"resnet18", false},
+            {"efficientnetb0", false}
+        };
+        std::vector<int> free_slot_list; int slot_num = 0;
+        int gpu_num = 0;
+        for(auto node:_nodeRunnersList) {
+            auto session_list = node->get_session_list();
+            if(gpu_num == gpu_id) session_list = _session_lst;
+            gpu_num++;
+            for(auto [session_ptr, _]:session_list) {
+                auto model_name = session_ptr->model_name;
+
+                if(session_ptr->model_name == "EMPTY") {
+                    free_slot_list.push_back(slot_num);
+                } else {
+                    cur_model[session_ptr->model_name] = true;
+                }
+
+                slot_num++;
+            }
+        }
+        return {cur_model, free_slot_list};
+    }
+
+    void print_current_schedule() {
+        int node_num = 0;
+        for(auto node:_nodeRunnersList) {
+            LOG_DEBUG(_logger, "GPU {}", node_num++);
+            auto session_list = node->get_session_list();
+            int slot_num = 0;
+            for(auto [session_ptr,_]:session_list) {
+                LOG_DEBUG(_logger, "{}. {}, {}", slot_num++, session_ptr->model_name, session_ptr->batch_size);
+            }
+        }
+    }
+
+    int step_count = 0;
+    void update_schedule_per_slot(const StepRequestReduced* request) {
+        print_current_schedule();
+
+        step_count++;
+        auto& entry = request->slot_entry();
+
+        int slot_id = entry.slot_id();
+        int model_id = entry.model_id();
+        int batch_delta = entry.batch_delta();
+        bool in_parallel = entry.in_parallel();
+
+        LOG_DEBUG(_logger, "LOG: {}, {}, {}, {}", slot_id, model_id, batch_delta, in_parallel);
+        _logger->flush();
+
+        int num_gpus = _gpuList.size();
+        int slot_per_gpu = SLOTS_PER_GPU;
+
+        // perform no update when slot id is max
+        if(slot_id == (slot_per_gpu * num_gpus)) {
+            LOG_DEBUG(_logger, "STEP: No update performed");
+            return;
+        }
+
+        int gpu_id = slot_id / slot_per_gpu;
+        int slot_num = slot_id % slot_per_gpu;
+        auto session_list = _nodeRunnersList[gpu_id]->get_session_list();
+
+        std::string cur_model = session_list[slot_num].first->model_name;
+        std::string new_model = id_to_model[model_id];
+
+        LOG_DEBUG(_logger, "LOG: before if");
+        _logger->flush();
+
+        if(cur_model == new_model) {
+            LOG_DEBUG(_logger, "LOG: in if: {}", cur_model);
+            _logger->flush();
+
+
+            if(cur_model == "EMPTY") return;
+
+            // simply update the batch size in session list
+            int new_batch_size = std::max(session_list[slot_num].first->batch_size + batch_delta, 0);
+            if(new_batch_size == 0) {
+                session_list[slot_num].first = std::make_shared<Session> ("EMPTY", 0, 0, 0);
+            } else {
+                session_list[slot_num].first->batch_size = new_batch_size;
+                session_list[slot_num].second.second = in_parallel;
+            }    
+        } else {
+            LOG_DEBUG(_logger, "LOG: in else: {}, {}", cur_model, new_model);
+            _logger->flush();
+            if(new_model == "EMPTY") {
+                session_list[slot_num].first = std::make_shared<Session> ("EMPTY", 0, 0, 0);
+            } else {
+                int new_batch_size = std::max(batch_delta, 0);
+                if(new_batch_size == 0) {
+                    session_list[slot_num].first = std::make_shared<Session> ("EMPTY", 0, 0, 0);
+                } else {
+                    session_list[slot_num].first = std::make_shared<Session> (new_model, 0, 0, new_batch_size);
+                    session_list[slot_num].second.second = in_parallel;
+                }  
+            }
+        }
+
+        // additional check for safety - If the request rate for the model in non-zero, then put 
+        // the model with batch size 8 in the frist free slot
+        LOG_DEBUG(_logger, "get cur model list");
+        auto return_val = get_cur_model_list(session_list, gpu_id);
+        auto cur_model_list = return_val.first;
+        auto free_slot_list = return_val.second; int ind = 0;
+        
+        int xgpu_id = 1;
+        if(gpu_id == 1) xgpu_id = 0;
+        LOG_DEBUG(_logger, "xgpu_id {}", xgpu_id);
+        auto xsession_list = _nodeRunnersList[xgpu_id]->get_session_list();
+        bool needs_update = false;
+        
+        for(auto [model_name, processor]:_requestProcessorList) {
+            auto request_rate = processor->get_request_rate();
+            LOG_DEBUG(_logger, "1: {}, {}", request_rate, model_name);
+            if(request_rate > 0 and cur_model_list[model_name] == false) {
+                LOG_DEBUG(_logger, "2: {}", ind);
+                if(ind >= free_slot_list.size()) continue;
+                int slot_num = free_slot_list[ind++];
+                int cgpu_id = slot_num / slot_per_gpu;
+                
+                LOG_DEBUG(_logger, "slot_num {}", slot_num);
+                if(cgpu_id == gpu_id) {
+                    int s_num = slot_num % slot_per_gpu;
+                    session_list[s_num].first = std::make_shared<Session> (model_name, 0, 0, 8);
+                    LOG_DEBUG(_logger, "Putting model {} in free slot {} on gpu {} with batch size 8", model_name, s_num, gpu_id);
+                } else {
+                    int s_num = slot_num % slot_per_gpu;
+                    needs_update = true;
+                    xsession_list[s_num].first = std::make_shared<Session> (model_name, 0, 0, 8);
+                    LOG_DEBUG(_logger, "Putting model {} in free slot {} on gpu {} with batch size 8", model_name, s_num, gpu_id);
+                }
+            }
+        }
+
+        if(needs_update) {
+            Node xnew_node(xsession_list);
+            _nodeRunnersList[xgpu_id]->updateNode(xnew_node);
+        }
+
+        Node new_node(session_list);
+        LOG_DEBUG(_logger, "Calling update node on Node Runner\n");
+        _nodeRunnersList[gpu_id]->updateNode(new_node);
+    }
+
+    void update_schedule(const StepRequest *request) {
+        step_count++;
+
+        std::vector<int> batch_deltas;
+        for(int delta:request->batch_deltas()) {
+            batch_deltas.push_back(delta);
+        }
+
+        std::vector<std::vector<int>> batch_sizes;
+        for(auto runner:_nodeRunnersList) {
+            batch_sizes.push_back(runner->get_batch_per_model());
+        }
+        
+        int count = 0;
+        int gpu_id;
+        int num_gpus = _gpuList.size();
+        int num_models = _modelsList.size();
+        std::vector<std::pair<std::shared_ptr<Session>, std::pair<double, bool>>> session_list;
+
+        LOG_DEBUG(_logger, "UPDATE LOG: {}", step_count);
+        for(const auto& entry:request->entries()) {
+            int model_id = entry.model_id();
+            gpu_id = count / num_models;
+
+            if(model_id != num_models) {
+                std::string model_name = id_to_model[model_id];
+
+                bool in_parallel = entry.in_parallel();
+
+                int new_batch_size = std::max(0, batch_sizes[gpu_id][model_id] + batch_deltas[gpu_id * num_models + model_id]);
+                
+                LOG_DEBUG(_logger, "UPDATE LOG: gpu: {}, model: {}, batch size: {}", gpu_id, model_name, new_batch_size);
+                if(new_batch_size>0) {
+                    std::shared_ptr<Session> session = std::make_shared<Session>(model_name, _latencies[model_name], 0, new_batch_size);
+                    session_list.push_back({session, {0, in_parallel}});
+                }
+            }
+
+            count++;
+            if(count % num_models == 0) {
+                // make the node and call update
+                Node new_node(session_list);
+                _nodeRunnersList[gpu_id]->updateNode(new_node);
+
+                session_list.clear();
+            }
+        }
+    }
 
     void start() {
         // start the loop for continuously checking the request rates and updating the schedule
@@ -68,14 +519,19 @@ private:
     std::vector<std::shared_ptr<Gpu>> _gpuList;
     std::map<std::string, std::string> _modelsList;
     std::map<std::string, std::shared_ptr<RequestProcessor>> _requestProcessorList;
+    std::shared_ptr<Simulator> _simulator;
     std::map<std::string, double> _latencies;
     std::string _profilingFolder;
     std::vector<std::shared_ptr<NodeRunner>> _nodeRunnersList;
     std::shared_ptr<Scheduler> _scheduler;
     std::thread _runner_thread;
+    std::thread _simulation_thread;
+    std::vector<std::string> id_to_model;
+    std::map<std::string, int> model_to_id;
     bool _running = false;
-    const int _interval = 5; // in seconds
+    const int _interval = 2; // in seconds
     std::shared_ptr<spdlog::logger> _logger;
+    std::string _run_mode;
 
     std::map<std::string, double> _model_slos_us; // SLO thresholds in microseconds
     double _default_slo_us = 10000.0; // Default SLO threshold
@@ -123,31 +579,34 @@ private:
         // query request processors at given frequency to update schedule
         while(true) {
             if(!_running) break;
+            print_current_schedule();
             
-            // get session list by querying request processors
-            LOG_DEBUG(_logger, "Querying request processors");
-            auto sessionList = generate_sessions();
+            if(_run_mode != "batch8") {
+                // get session list by querying request processors
+                LOG_DEBUG(_logger, "Querying request processors");
+                auto sessionList = generate_sessions();
 
-            // generate new shcedule
-            auto nodeList = _scheduler->generate_schedule(sessionList);
+                // generate new shcedule
+                auto nodeList = _scheduler->generate_schedule(sessionList);
 
-            // check to make sure we are not using more than allowed GPUs
-            if (nodeList.size() > _gpuList.size()) {
-                std::cerr << "Assertion failed: nodeList.size() (" << nodeList.size()
-                          << ") > _gpuList.size() (" << _gpuList.size() << ")" << std::endl;
-                assert(false);
-            }          
+                // check to make sure we are not using more than allowed GPUs
+                if (nodeList.size() > _gpuList.size()) {
+                    std::cerr << "Assertion failed: nodeList.size() (" << nodeList.size()
+                            << ") > _gpuList.size() (" << _gpuList.size() << ")" << std::endl;
+                    assert(false);
+                }          
 
-            /* // hack to test parallel execution on gpu streams
-            if(nodeList.size() > 0) {
-                for(int i=0;i<nodeList[0]->session_list.size();i++) {
-                    nodeList[0]->session_list[i].second.second = 1;
+                /* // hack to test parallel execution on gpu streams
+                if(nodeList.size() > 0) {
+                    for(int i=0;i<nodeList[0]->session_list.size();i++) {
+                        nodeList[0]->session_list[i].second.second = 1;
+                    }
+                } */
+
+                // update NodeRunners with new schedule
+                for(int i=0;i<nodeList.size();i++) {
+                    _nodeRunnersList[i]->updateNode(*nodeList[i]);
                 }
-            } */
-
-            // update NodeRunners with new schedule
-            for(int i=0;i<nodeList.size();i++) {
-                _nodeRunnersList[i]->updateNode(*nodeList[i]);
             }
 
             // pause before repeating
